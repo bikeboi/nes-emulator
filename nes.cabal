@@ -1,0 +1,44 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: d32da1faf041a767526104b9269878ea80ae79544282f26957e3058a1ff36bd2
+
+name:           nes
+version:        0.1.0.0
+maintainer:     bikeboi
+build-type:     Simple
+
+executable nes
+  main-is: Main.hs
+  other-modules:
+      CPU
+  hs-source-dirs:
+      src
+  build-depends:
+      array
+    , base
+    , mtl
+    , transformers
+  default-language: Haskell2010
+
+test-suite spec
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      CPU
+      Main
+      Paths_nes
+  hs-source-dirs:
+      src
+      test
+  build-depends:
+      QuickCheck
+    , array
+    , base
+    , hspec
+    , mtl
+    , transformers
+  default-language: Haskell2010

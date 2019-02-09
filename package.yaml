@@ -1,0 +1,26 @@
+name: nes
+version: 0.1.0.0
+maintainer: bikeboi
+
+dependencies:
+  - base
+  - array
+  - mtl
+  - transformers
+
+executables:
+  nes:
+    main: Main.hs
+    source-dirs: src
+    other-modules:
+      - CPU
+
+tests:
+  spec:
+    main: "Spec.hs"
+    source-dirs:
+      - src
+      - test
+    dependencies:
+      - hspec
+      - QuickCheck
