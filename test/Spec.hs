@@ -14,9 +14,10 @@ runOp' = fmap fst . (>>=) initCPU . runOp
 memorySpec = hspec $ do
   getSet
   zeroPageWrap
+  indirect
 
 getSet = do
-  describe "memory access and mutation" $ do
+  describe "Memory access and mutation" $ do
     it "stores 5 in memory location 12 and retrieves it" $ do
       runOp' getSetZ `shouldReturn` (0,5)
       
@@ -30,11 +31,25 @@ getSet = do
                         getAddr 345 >>= return . (,) a
 
 zeroPageWrap = do
-  describe "zero page addressing should wrap" $ do
+  describe "Zero page indexed addressing wrapping" $ do
     it "checks wrapping for Z,X addressing" $ do
       flip shouldReturn 12 $ runOp' $ setup X >> derefZ ZX 255
+
     it "checks wrapping for Z,Y addressing" $ do
       flip shouldReturn 12 $ runOp' $ setup Y >> derefZ ZY 255
-  where fillReg reg = setReg reg 3
-        fillMem = setAddrZ 2 12
-        setup reg = fillReg reg >> fillMem
+  where setup reg = setReg reg 3 >> setAddrZ 2 12
+
+indirect = do
+  describe "Indirect addressing modes" $ do
+    it "indexed indirect addressing" $ do
+      flip shouldReturn 67 $ runOp' $ do
+        setAddrZ 7 0x03 >> setAddrZ 8 0x04
+        setAddr 0x0403 67
+        setReg X 0x02
+        derefZ IXIN 0x05
+    it "indirect indexed addressing" $ do
+      flip shouldReturn 67 $ runOp' $ do
+        setReg Y 0x01
+        setAddr 0x0403 67
+        setAddrZ 7 0x02 >> setAddrZ 8 0x04
+        derefZ INIX 0x07
