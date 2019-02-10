@@ -2,6 +2,8 @@ module Main where
 
 import Test.Hspec
 import CPU
+import Control.Monad
+import Control.Applicative
 
 main = do
   memorySpec
@@ -15,6 +17,7 @@ memorySpec = hspec $ do
   getSet
   zeroPageWrap
   indirect
+  flags
 
 getSet = do
   describe "Memory access and mutation" $ do
@@ -53,3 +56,16 @@ indirect = do
         setAddr 0x0403 67
         setAddrZ 7 0x02 >> setAddrZ 8 0x04
         derefZ INIX 0x07
+
+-- Processor Status Flags
+flags = do
+  describe "Processor status flags" $ do
+    it "sets flags" $ do
+      flip shouldReturn True $ runOp' $
+        allFlags (liftA2 (>>) setFlag checkFlag) (lift2Weird (&&)) True
+    it "resets flags" $ do
+      flip shouldReturn False $ runOp' $
+        allFlags (liftA2 (>>) resetFlag checkFlag) (lift2Weird (&&)) True
+  where allFlags :: Monad m => (Flag -> m a) -> (b -> a -> m b) -> b -> m b
+        allFlags f m z = foldM m z =<< mapM (\fl -> f fl) [N ..]
+        lift2Weird f = \a b -> return (a `f` b)

@@ -1,17 +1,27 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, BinaryLiterals #-}
 
 module CPU where
 
 import Numeric
+import Data.Int
 import Data.Word
 import Data.Bits
 import Data.Array.IO
+import qualified Data.Map.Strict as M
 import Control.Monad.State
 import Control.Monad.IO.Class
 
 -- Helpers
-to16 :: Word8 -> Word16
+-- | Promote 8-bit number t- 16-bit
+to16 :: Integral a => a -> Word16
 to16 = fromIntegral
+
+-- | Truncate all bits > 8
+to8 :: Integral a => a -> Word8
+to8 = fromIntegral
+
+toS8 :: Integral a => a -> Int8
+toS8 = fromIntegral
 
 type Memory = (ZeroPage,Mem)
 type ZeroPage = IOUArray Word8 Word8
@@ -23,7 +33,8 @@ data CPU =
       , _XReg :: Word8
       , _YReg :: Word8
       , _StackPtr :: Word8
-      , _ProgCntr :: Word8 } deriving (Eq)
+      , _ProgCntr :: Word8
+      , _Flags :: Word8 } deriving (Eq)
 
 showCPU :: CPU -> IO ()
 showCPU CPU {..} = do putStrLn $ "A-REG: " ++ show _AReg
@@ -35,6 +46,36 @@ showCPU CPU {..} = do putStrLn $ "A-REG: " ++ show _AReg
 type Op = StateT CPU IO
 runOp :: Op a -> CPU -> IO (a,CPU)
 runOp op cpu = runStateT op cpu
+
+-- Flag Helpers
+data Flag = N | V | D | I | Z | C deriving (Eq, Show, Ord, Enum)
+
+flagMap :: M.Map Flag Word8
+flagMap = M.fromList $ [(N, 0b10000000)
+                       ,(V, 0b01000000)
+                       ,(D, 0b00001000)
+                       ,(I, 0b00000100)
+                       ,(Z, 0b00000010)
+                       ,(C, 0b00000001)]
+
+withFlags :: (Word8 -> Op a) -> Op a
+withFlags f = _Flags <$> get >>= f
+
+checkFlag :: Flag -> Op Bool
+checkFlag f = let flag = flagMap M.! f
+              in withFlags (\status -> return $ flag .&. status == flag)
+
+modFlag :: Flag -> (Word8 -> Word8) -> Op ()
+modFlag f fw = do cpu <- get
+                  withFlags (\status -> put (cpu { _Flags = fw status }))
+
+setFlag :: Flag -> Op ()
+setFlag f = let flag = flagMap M.! f
+            in modFlag f (.|. flag)
+
+resetFlag :: Flag -> Op ()
+resetFlag f = let flag = flagMap M.! f
+              in modFlag f (.&. (complement flag))
 
 -- Memory Helpers
 getMemory :: Op Memory
@@ -154,6 +195,7 @@ initCPU = do mem <- initMem
                      , _XReg = 0
                      , _YReg = 0
                      , _StackPtr = 0
-                     , _ProgCntr = 0 }
+                     , _ProgCntr = 0
+                     , _Flags = 0b00000000 }
   where initZ = newArray (0,255) 0
         initMem = newArray (256,65535) 0

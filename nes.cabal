@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d32da1faf041a767526104b9269878ea80ae79544282f26957e3058a1ff36bd2
+-- hash: 919d1e7fad67e6a22764138d543e803acf7b53c03625568d8ef270ae3cf28160
 
 name:           nes
 version:        0.1.0.0
@@ -20,6 +20,7 @@ executable nes
   build-depends:
       array
     , base
+    , containers
     , mtl
     , transformers
   default-language: Haskell2010
@@ -38,6 +39,7 @@ test-suite spec
       QuickCheck
     , array
     , base
+    , containers
     , hspec
     , mtl
     , transformers
