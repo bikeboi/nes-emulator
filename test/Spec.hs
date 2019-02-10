@@ -7,24 +7,29 @@ import Control.Applicative
 
 main = do
   memorySpec
-
+  flagSpec
+  
 -- CPU Tests
--- Memory Access
--- Memory Helper
 runOp' = fmap fst . (>>=) initCPU . runOp
 
+-- Status flags spec tests
+flagSpec = hspec $ do
+  describe "Status Flag spec tests" $ do
+    flagStatus
+
+-- Memory spec tests
 memorySpec = hspec $ do
-  getSet
-  zeroPageWrap
-  indirect
-  flags
+  describe "Memory spec tests" $ do
+    getSet
+    zeroPageWrap
+    indirect
 
 getSet = do
-  describe "Memory access and mutation" $ do
-    it "stores 5 in memory location 12 and retrieves it" $ do
+  describe "Access and mutation" $ do
+    it "zero page addressing" $ do
       runOp' getSetZ `shouldReturn` (0,5)
       
-    it "stores 69 in memory location 345 and retrieves it" $ do
+    it "absolute addressing" $ do
       runOp' getSetAddr `shouldReturn` (0,69)
   where getSetZ = do a <- getAddrZ 12
                      setAddrZ 12 5
@@ -44,13 +49,13 @@ zeroPageWrap = do
 
 indirect = do
   describe "Indirect addressing modes" $ do
-    it "indexed indirect addressing" $ do
+    it "indexed-indirect addressing" $ do
       flip shouldReturn 67 $ runOp' $ do
         setAddrZ 7 0x03 >> setAddrZ 8 0x04
         setAddr 0x0403 67
         setReg X 0x02
         derefZ IXIN 0x05
-    it "indirect indexed addressing" $ do
+    it "indirect-indexed addressing" $ do
       flip shouldReturn 67 $ runOp' $ do
         setReg Y 0x01
         setAddr 0x0403 67
@@ -58,12 +63,12 @@ indirect = do
         derefZ INIX 0x07
 
 -- Processor Status Flags
-flags = do
-  describe "Processor status flags" $ do
-    it "sets flags" $ do
+flagStatus = do
+  describe "Set-Reset" $ do
+    it "set flags" $ do
       flip shouldReturn True $ runOp' $
         allFlags (liftA2 (>>) setFlag checkFlag) (lift2Weird (&&)) True
-    it "resets flags" $ do
+    it "reset flags" $ do
       flip shouldReturn False $ runOp' $
         allFlags (liftA2 (>>) resetFlag checkFlag) (lift2Weird (&&)) True
   where allFlags :: Monad m => (Flag -> m a) -> (b -> a -> m b) -> b -> m b

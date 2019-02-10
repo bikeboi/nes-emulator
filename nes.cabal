@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 919d1e7fad67e6a22764138d543e803acf7b53c03625568d8ef270ae3cf28160
+-- hash: c1d90b281442e8888e9fe0bd363d2bdc040019b8392644f641915c67b6acc119
 
 name:           nes
 version:        0.1.0.0
@@ -15,6 +15,7 @@ executable nes
   main-is: Main.hs
   other-modules:
       CPU
+      OpCode
   hs-source-dirs:
       src
   build-depends:
@@ -31,6 +32,7 @@ test-suite spec
   other-modules:
       CPU
       Main
+      OpCode
       Paths_nes
   hs-source-dirs:
       src

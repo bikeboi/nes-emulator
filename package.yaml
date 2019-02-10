@@ -15,6 +15,7 @@ executables:
     source-dirs: src
     other-modules:
       - CPU
+      - OpCode
 
 tests:
   spec:
