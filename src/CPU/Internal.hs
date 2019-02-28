@@ -1,14 +1,14 @@
-{-# LANGUAGE RankNTypes, RecordWildCards #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards, BinaryLiterals #-}
 
 module CPU.Internal (
-  Processor
-  , CPU, runCPU, procc
-  , readRAM, writeRAM
+  Processor, Interrupt(..)
+  , CPU, runCPU, procc, cpuErr
+  , readRAM, writeRAM, loadChunkRAM
   , zp, zpX, zpY, ab, abX, abY
   , ind, inIx, ixIn, rel
-  , regA, regX, regY, stack, status, prog
+  , regA, regX, regY, stack, status, prog, interrupt
   , mutA, mutX, mutY, mutStack, mutStatus, mutProg
-  , setA, setX, setY, setStack, setStatus, setProg
+  , setA, setX, setY, setStack, setStatus, setProg, setInterrupt
   , pushStack, popStack
   , eat8, eat16
   , setN, setV, setB, setI, setZ, setC
@@ -21,13 +21,13 @@ import Data.Word
 import Data.Int
 import Data.Bits hiding (bit)
 import Data.Monoid (mconcat)
+import qualified Data.ByteString as B
 
-import Data.Array.MArray
-import Control.Monad.STM
+import Control.Monad.ST
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State.Strict
-import Control.Monad.Trans.Class (lift)
+import Control.Monad.IO.Class (liftIO)
 
 -- Data Types
 data Processor =
@@ -36,7 +36,8 @@ data Processor =
             , _regX :: Word8
             , _regY :: Word8
             , _stack :: Word8
-            , _prog :: Word16 } deriving Eq
+            , _prog :: Word16
+            , _interrupt :: Maybe Interrupt } deriving Eq
 
 instance Show Processor where
   show Processor{..} = mconcat . map (\(a,b) -> a ++ b ++ " ") $
@@ -47,18 +48,17 @@ instance Show Processor where
                        ,("SP:", show16 _stack)
                        ,("STAT: ", show2 _status)]
 
+data Interrupt = NMI | RST | IRQ deriving (Eq, Show)
+
 initProcessor :: Processor
 initProcessor =
-  Processor { _status = 0x00
+  Processor { _status = 0b00000100
             , _regA   = 0x00
             , _regX   = 0x00
             , _regY   = 0x00
             , _stack  = 0xFD
-            , _prog   = 0x6000 }
-
--- ROM
-loadROM :: [Word8] -> CPU ()
-loadROM bs = zipWithM writeRAM [0x6000..] bs >> return ()
+            , _prog   = 0x6000
+            , _interrupt = Nothing }
 
 modStatus, modA, modX, modY, modStack :: (Word8 -> Word8) -> Processor -> Processor
 modStatus f p@Processor{..} = p { _status = f _status }
@@ -66,28 +66,52 @@ modA f p@Processor{..} = p { _regA = f _regA }
 modX f p@Processor{..} = p { _regX = f _regX }
 modY f p@Processor{..} = p { _regY = f _regY }
 modStack f p@Processor{..} = p { _stack = f _stack }
+
 modProg :: (Word16 -> Word16) -> Processor -> Processor
 modProg f p@Processor{..} = p { _prog = f _prog }
 
--- The CPU Monad
-type CPUT m arr = ExceptT String (ReaderT arr (StateT Processor m))
-type CPU = CPUT MemMonad Memory
+setInterrupt' :: Maybe Interrupt -> Processor -> Processor
+setInterrupt' m p = p { _interrupt = m }
 
-runCPU :: (Monad m, MArray a e m, Ix i) => a i e -> CPUT m (a i e) x -> m (Either String x,Processor)
-runCPU mem op = runStateT (runReaderT (runExceptT op) mem) initProcessor
+-- The CPU Monad
+newtype CPU a =
+  CPU { unCPU :: ExceptT String (ReaderT Memory (StateT Processor IO)) a }
+  deriving (Functor, Applicative, Monad
+           , MonadError String
+           , MonadReader Memory
+           , MonadState Processor
+           , MonadIO)
+
+runCPU :: Memory -> CPU a -> IO (Either String a,Processor)
+runCPU mem op = runStateT (runReaderT (runExceptT  (unCPU op)) mem) initProcessor
+
+cpuErr :: String -> CPU a
+cpuErr = throwError
 
 -- Combinators Galore
 procc :: CPU Processor
 procc = get
 
+-- Interrupts
+setInterrupt :: Interrupt -> CPU ()
+setInterrupt NMI = procc >>= put . setInterrupt' (Just NMI)
+setInterrupt int = do i <- sI
+                      case i of
+                        True -> return ()
+                        False -> procc >>= put . setInterrupt' (Just int)
+
 -- Memory
 readRAM :: Word16 -> CPU Word8
 readRAM a = do mem <- ask
-               lift . lift . lift $ readMem mem a
+               liftIO $ readMem mem a
 
 writeRAM :: Word16 -> Word8 -> CPU ()
 writeRAM a v = do mem <- ask
-                  lift . lift . lift $ writeMem mem a v
+                  liftIO $ writeMem mem a v
+
+loadChunkRAM :: B.ByteString -> Word16 -> CPU ()
+loadChunkRAM b s = do mem <- ask
+                      liftIO $ loadChunk b s mem
 
 -- General CPU access
 status, regX, regY, regA, stack :: CPU Word8
@@ -99,6 +123,9 @@ stack  = _stack <$> procc
 
 prog :: CPU Word16
 prog = _prog <$> procc
+
+interrupt :: CPU (Maybe Interrupt)
+interrupt = _interrupt <$> procc
 
 -- General cpu mods
 mutReg :: ((a -> a) -> Processor -> Processor) -> (a -> a) -> CPU ()

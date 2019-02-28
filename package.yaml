@@ -5,7 +5,7 @@ maintainer: bikeboi
 dependencies:
   - base
   - bytestring
-  - array
+  - vector
   - mtl
   - transformers
   - containers
@@ -17,6 +17,7 @@ executables:
     source-dirs: src
     other-modules:
       - CPU
+      - CPU.ROM
       - CPU.Internal
       - CPU.OpCode
       - CPU.Decode

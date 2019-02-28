@@ -1,28 +1,43 @@
 {-# LANGUAGE RankNTypes #-}
 
-module Memory (readMem,writeMem,Memory,initMem,MemMonad) where
+module Memory (readMem,writeMem,loadChunk,snapshot,Memory,initMem) where
 
-import Data.Array.MArray
-import Data.Array.IO
+import Prelude hiding (replicate)
+
+import qualified Data.Vector as V
+import Control.Concurrent.MVar
+import Control.Monad (void)
+import Data.STRef
 import Data.Word
 import Data.Bits
+import qualified Data.ByteString as B
+
 import Util
 
 -- Memory mapping
-type Memory = IOArray Word16 Word8
-type MemMonad = IO
+type Memory = V.Vector (MVar Word8)
 
 -- Initializing
--- newArray :: m (a i e)
-initMem :: MemMonad Memory
-initMem = newArray (0x0000,0xFFFF) 0x00
+initMem :: IO Memory
+initMem = V.replicateM 0x10000 (newMVar 0x00)
 
 -- Basic Memory primitives
-readMem :: Memory -> Word16 -> MemMonad Word8
-readMem mem x = readArray mem $ mirror x
+readMem :: Memory -> Word16 -> IO Word8
+readMem mem a = do m <- return $ mem V.! (fromIntegral . mirror) a
+                   readMVar m
 
-writeMem :: Memory -> Word16 -> Word8 -> MemMonad ()
-writeMem mem a x = writeArray mem (mirror a) x
+writeMem :: Memory -> Word16 -> Word8 -> IO ()
+writeMem mem a x = do m <- return $ mem V.! (fromIntegral . mirror) a
+                      void $ swapMVar m x
+
+snapshot :: Memory -> IO (V.Vector Word8)
+snapshot mem = mapM readMVar mem
+
+-- Helpful combinators
+loadChunk :: B.ByteString -> Word16 -> Memory -> IO ()
+loadChunk b start mem = let bytes = V.fromList $ B.unpack b
+                            (x,xs) = V.splitAt (fromIntegral start) mem
+                        in V.zipWithM_ swapMVar xs bytes
 
 -- Mirroring (nice and pure)
 mirror :: Word16 -> Word16

@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, RecordWildCards #-}
 
-module CPU (CPU,runCPU,exec,loadROM,readROM) where
-
+module CPU (exec,stepCPU) where
 import Prelude hiding (and)
 import Debug.Trace
 
@@ -10,53 +9,36 @@ import CPU.Internal
 import CPU.OpCode
 import CPU.Decode
 
-import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as B
 import Data.Bits (testBit)
 import Data.Word
 import Data.Int
 import Control.Monad
-import Control.Monad.Except (throwError)
-
--- Main functions
--- Loads ROM in and sets program counter (Takes ROM bytestring - header)
-loadROM :: B.ByteString -> CPU ()
-loadROM bs = let header = B.take 16 bs
-                 body   = B.drop 16 bs
-                 spec   = romSpec header
-             in loadROM' body spec
-  where limBool b x = if b then x else 0
-        bankSize = 16 * 1024
-        loadROM' bs ROMSpec{..} =
-          let start = B.drop (limBool _trainer 512) bs -- We're ignoring trainers
-              (lowerBank,rest) = B.splitAt bankSize start
-              (upperBank,rest') = B.splitAt (limBool (_prgSize > 1) bankSize) rest
-              prgRom = B.unpack $ lowerBank `mappend` upperBank
-          in zipWithM_ writeRAM [0xC000..] prgRom
-
-readROM :: FilePath -> IO B.ByteString
-readROM fp = do f <- B.readFile fp
-                let constant = B.unpack $ B.take 4 f
-                if constant /= [0x4e,0x45,0x53,0x1a]
-                  then error $ "Nasty ROM:" ++ show constant
-                  else putStrLn ("READ ROM: " ++ fp) >> return f
-
-romSpec :: B.ByteString -> ROMSpec
-romSpec bs = let prgSize = B.index bs 4
-                 chrSize = B.index bs 5
-                 flag6 = B.index bs 2
-                 trainer = testBit flag6 2
-                 sram = testBit flag6 1
-                 -- More Data Later
-             in ROMSpec prgSize chrSize trainer sram
-
-data ROMSpec =
-  ROMSpec { _prgSize :: Word8
-          , _chrSize :: Word8
-          , _trainer :: Bool
-          , _sram    :: Bool     -- More Data Later
-          } deriving (Eq, Show)
+import Control.Monad.Except (liftEither)
 
 -- Executing instructions
+stepCPU :: CPU ()
+stepCPU = do i <- interrupt
+             case i of
+               Nothing -> eat8 >>= liftEither . decodeOp >>= exec
+               Just m -> handleInterrupt m
+
+handleInterrupt :: Interrupt -> CPU ()
+handleInterrupt i = do
+  iF <- sI -- Interrupt disable flag
+  case iF of
+    True -> if i == NMI then clrI >> jumpTo 0xFFFA
+            else return ()
+    False -> clrI >> jumpTo (iLoc i)
+  where iLoc IRQ = 0xFFFE
+        iLoc RST = 0xFFFC
+        jumpTo a = do
+          p <- prog
+          let (l,h) = (low p,high p)
+          pushStack h >> pushStack l
+          status >>= pushStack
+          ind a >>= setProg
+
 exec :: OpCode -> CPU ()
 exec (op,a) = case op of
     LDA -> pnt a >>= lda
@@ -114,7 +96,7 @@ exec (op,a) = case op of
     SED -> return () -- Do nothing
     NOP -> nop
     RTI -> rti
-    BRK -> throwError "Handle BRK higher up mate"
+    BRK -> setInterrupt IRQ
 
 pnt :: AddrMode -> CPU Word8
 pnt Imm = eat8
@@ -129,21 +111,24 @@ resolve A  = eat16 >>= ab
 resolve Ax = eat16 >>= abX
 resolve Ay = eat16 >>= abY
 resolve Ind = eat16 >>= ind
-resolve Imm = throwError "Cannot dereference an immediate value"
+resolve Imm = cpuErr "Cannot dereference an immediate value"
 resolve XInd = eat8 >>= ixIn
 resolve IndY = eat8 >>= inIx
 resolve Rel  = eat8 >>= rel . toS8
 
 resolveRel :: AddrMode -> CPU Int8
 resolveRel Rel = toS8 <$> eat8
-resolveRel _ = throwError "Cannot resolve relative address in that mode"
+resolveRel _ = cpuErr "Cannot resolve relative address in that mode"
 
 -- Instructions that take both accumulator and memory as args
 mutRef :: AddrMode -> Op -> (Word8 -> CPU Word8) -> CPU ()
 mutRef Acc _ f = do ra <- regA
                     f ra >>= setA
-mutRef Imm op _  = throwError $ "Cannot mutate immediate address " ++ show op ++ " " ++ show Imm
-mutRef Impl op _ = throwError $ "Cannot mutate implied address " ++ show op
+mutRef Imm op _  = cpuErr $ concat ["Cannot mutate immediate address "
+                                    ,show op," "
+                                    ,show Imm]
+                  
+mutRef Impl op _ = cpuErr $ "Cannot mutate implied address " ++ show op
 mutRef am _ f = do a <- resolve am
                    val <- readRAM a
                    f val >>= writeRAM a
