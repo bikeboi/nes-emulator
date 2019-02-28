@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c1d90b281442e8888e9fe0bd363d2bdc040019b8392644f641915c67b6acc119
+-- hash: 031f26312fa2228be6efdcd79d654af8925b71568a7c73259dcddf59279ff3ee
 
 name:           nes
 version:        0.1.0.0
@@ -15,14 +15,21 @@ executable nes
   main-is: Main.hs
   other-modules:
       CPU
-      OpCode
+      CPU.Internal
+      CPU.OpCode
+      CPU.Decode
+      CPU.Debug
+      Memory
+      Util
   hs-source-dirs:
       src
   build-depends:
       array
     , base
+    , bytestring
     , containers
     , mtl
+    , stm
     , transformers
   default-language: Haskell2010
 
@@ -31,8 +38,13 @@ test-suite spec
   main-is: Spec.hs
   other-modules:
       CPU
+      CPU.Debug
+      CPU.Decode
+      CPU.Internal
+      CPU.OpCode
       Main
-      OpCode
+      Memory
+      Util
       Paths_nes
   hs-source-dirs:
       src
@@ -41,8 +53,10 @@ test-suite spec
       QuickCheck
     , array
     , base
+    , bytestring
     , containers
     , hspec
     , mtl
+    , stm
     , transformers
   default-language: Haskell2010

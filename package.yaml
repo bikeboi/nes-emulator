@@ -4,10 +4,12 @@ maintainer: bikeboi
 
 dependencies:
   - base
+  - bytestring
   - array
   - mtl
   - transformers
   - containers
+  - stm
 
 executables:
   nes:
@@ -15,7 +17,12 @@ executables:
     source-dirs: src
     other-modules:
       - CPU
-      - OpCode
+      - CPU.Internal
+      - CPU.OpCode
+      - CPU.Decode
+      - CPU.Debug
+      - Memory
+      - Util
 
 tests:
   spec:

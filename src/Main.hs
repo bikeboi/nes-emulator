@@ -1,6 +1,6 @@
 module Main where
 
-import CPU
-import OpCode
+import CPU.Debug
 
-main = putStrLn "YEET"
+main :: IO ()
+main = do putStrLn "NES"
