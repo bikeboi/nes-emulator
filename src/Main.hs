@@ -1,6 +1,7 @@
 module Main where
 
 import CPU.Debug
+import PPU.Render
 
 main :: IO ()
-main = do putStrLn "NES"
+main = render 2

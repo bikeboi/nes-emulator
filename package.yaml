@@ -11,18 +11,29 @@ dependencies:
   - containers
   - stm
 
+  # Graphics
+  - sdl2
+  - linear
+
 executables:
   nes:
     main: Main.hs
     source-dirs: src
     other-modules:
+      # CPU
       - CPU
       - CPU.ROM
       - CPU.Internal
       - CPU.OpCode
       - CPU.Decode
       - CPU.Debug
+
+      # PPU
+      - PPU.Render
+
+      # Memory
       - Memory
+
       - Util
 
 tests:
