@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 5852570d4993f041ddbcd0c803fd277ee51be64adb57d6d28daf158bf9f4e438
+-- hash: 4b6a31f6634ea7aca72f870124a43c9acf4fd6878f87d080d8404bd7376ce14a
 
 name:           nes
 version:        0.1.0.0
@@ -50,11 +50,13 @@ test-suite spec
       CPU.Decode
       CPU.Internal
       CPU.OpCode
+      CPU.RAM
       CPU.ROM
       Main
       Memory
       PPU.Internal
       PPU.Render
+      PPU.VRAM
       Util
       Paths_nes
   hs-source-dirs:

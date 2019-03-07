@@ -23,19 +23,19 @@ import Data.Int
 import Control.Monad (join)
 
 -- Loading
-lda,ldx,ldy :: Word8 -> CPU ()
+lda,ldx,ldy :: Word8 -> CPU s ()
 lda x = negZero x >> setA x
 ldx x = negZero x >> setX x
 ldy x = negZero x >> setY x
 
 -- Storing
-sta,stx,sty :: Word16 -> CPU ()
+sta,stx,sty :: Word16 -> CPU s ()
 sta a = getA >>= writeRAM a
 stx a = getX >>= writeRAM a
 sty a = getY >>= writeRAM a
 
 -- Register Transfers
-tax,tay,txa,tya,tsx,txs :: CPU ()
+tax,tay,txa,tya,tsx,txs :: CPU s ()
 tax = getA >>= setX
 tay = getA >>= setY
 txa = getX >>= setA
@@ -44,14 +44,14 @@ tsx = getSP >>= setX
 txs = getX >>= setSP
 
 -- Stack operations
-pha,php,pla,plp :: CPU ()
+pha,php,pla,plp :: CPU s ()
 pha = getA >>= pushStack
 php = getPS >>= pushStack
 pla = popStack >>= setA
 plp = popStack >>= setPS
 
 -- Logical operations
-and,eor,ora,bit :: Word8 -> CPU ()
+and,eor,ora,bit :: Word8 -> CPU s ()
 and x = logical (.&. x)
 eor x = logical (xor x)
 ora x = logical (.|. x)
@@ -61,7 +61,7 @@ bit x = do
   negZero res
 
 -- Arithmetic
-adc, sbc :: Word8 -> CPU ()
+adc, sbc :: Word8 -> CPU s ()
 adc x = do a <- getA
            c <- (.&. 0x01) <$> getPS
            let ovf = ovfAdd x a .|. ovfAdd (x+a) c
@@ -80,30 +80,30 @@ sbc x = do a <- getA
            if carries then setC else clrC
            negZero res >> setA res
 
-cmp, cpx, cpy :: Word8 -> CPU ()
+cmp, cpx, cpy :: Word8 -> CPU s ()
 cmp x = getA >>= comparison x
 cpx x = getX >>= comparison x
 cpy x = getY >>= comparison x
 
 -- Increments
-inc :: Word16 -> CPU ()
+inc :: Word16 -> CPU s ()
 inc a = readRAM a >>= writeRAM a . (+1)
 
-inx, iny :: CPU ()
+inx, iny :: CPU s ()
 inx = mutX (+1)
 iny = mutY (+1)
 
 -- Decrements
-dec :: Word16 -> CPU ()
+dec :: Word16 -> CPU s ()
 dec a = readRAM a >>= writeRAM a . (+ (negate 1))
 
-dex, dey :: CPU ()
+dex, dey :: CPU s ()
 dex = mutX (\x -> to8 $ toS8 x + (negate 1))
 dey = mutY (\y -> to8 $ toS8 y + (negate 1))
 
 -- Logical ops
 -- THESE RETURN VALUES (annoyingly, since the accumulator can be used)
-asl, lsr, rol, ror :: Word8 -> CPU Word8
+asl, lsr, rol, ror :: Word8 -> CPU s Word8
 asl x = let shifted = x .<<. 1
         in do negZero shifted
               if testBit x 7 then setC else clrC
@@ -127,7 +127,7 @@ ror x = let roted = x .>>. 1
               return $ if c then roted .|. 0x80 else roted
 
 -- Jumps
-jmp, jsr :: Word16 -> CPU ()
+jmp, jsr :: Word16 -> CPU s ()
 jmp a = mutPC (const a)
 
 jsr a = do p <- (\i -> i - 1) <$> getPC
@@ -137,12 +137,12 @@ jsr a = do p <- (\i -> i - 1) <$> getPC
            pushStack lo
            mutPC (const a)
 
-rts :: CPU ()
+rts :: CPU s ()
 rts = do v <- lendian <$> popStack <*> popStack
          mutPC (const (v+1))
 
 -- Branching
-bcc, bcs, bne, beq, bpl, bmi, bvc, bvs :: Int8 -> CPU ()
+bcc, bcs, bne, beq, bpl, bmi, bvc, bvs :: Int8 -> CPU s ()
 bcc a = not <$> sC >>= branch a
 bcs a = sC >>= branch a
 bne a = not <$> sZ >>= branch a
@@ -153,18 +153,18 @@ bvc a = not <$> sV >>= branch a
 bvs a = pure True >>= branch a
 
 -- Clear flags
-clc, cli, clv :: CPU ()
+clc, cli, clv :: CPU s ()
 clc = clrC
 cli = clrI
 clv = clrV
 
 -- Set flags
-sec, sei :: CPU ()
+sec, sei :: CPU s ()
 sec = setC
 sei = setI
 
 -- Misc.
-brk, nop, rti :: CPU ()
+brk, nop, rti :: CPU s ()
 brk = error "End of getPCram"
 nop = return ()
 rti = do popStack >>= setPS
@@ -172,22 +172,22 @@ rti = do popStack >>= setPS
          mutPC (const a)
 
 -- Helpers
-negZero :: Word8 -> CPU ()
+negZero :: Word8 -> CPU s ()
 negZero x = do if x == 0 then setZ else clrZ
                if x < 0 then setN else clrN
 
-comparison :: Word8 -> Word8 -> CPU ()
+comparison :: Word8 -> Word8 -> CPU s ()
 comparison x y = do
   if x >= y then setC else clrC
   if x == y then setZ else clrZ
   if x <  y then setN else clrN
 
-branch :: Int8 -> Bool -> CPU ()
+branch :: Int8 -> Bool -> CPU s ()
 branch a b = if b
              then mutPC (to16 . (+ toS16 a) . toS16)
              else return ()
 
-logical :: (Word8 -> Word8) -> CPU ()
+logical :: (Word8 -> Word8) -> CPU s ()
 logical f = do res <- getA >>= return . f
                negZero res >> setA res
 

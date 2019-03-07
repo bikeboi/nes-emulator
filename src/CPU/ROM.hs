@@ -25,7 +25,7 @@ calcMapper :: Word8 -> Word8 -> Either String Mapper
 calcMapper 0 0 = Right NROM
 calcMapper x y = Left $ "Unsupported Mapper: " ++ show16 x ++ show16 y
 
-loadROM :: B.ByteString -> CPU ()
+loadROM :: B.ByteString -> CPU s ()
 loadROM b = let (header,body) = B.splitAt 16 b
             in do spec <- liftEither $ parseSpec header
                   loadSpec spec body
@@ -48,13 +48,13 @@ parseSpec b = do b' <- checkNES b
         checkConst b = B.unpack (B.take 4 b) == [0x4E,0x45,0x53,0x1A]
         (f6,f7) = (,) <$> flip B.index 6 <*> flip B.index 7 $ b
 
-loadSpec :: ROMSpec -> B.ByteString -> CPU ()
+loadSpec :: ROMSpec -> B.ByteString -> CPU s ()
 loadSpec spec@ROMSpec{..} b =
   let start = if _trainer then 512 else 0
   in case _mapper of
        NROM -> loadNROM spec (B.drop start b)
 
-loadNROM :: ROMSpec -> B.ByteString -> CPU ()
+loadNROM :: ROMSpec -> B.ByteString -> CPU s ()
 loadNROM ROMSpec{..} bs =
   let (lower,upper) = B.splitAt (1024*16) bs
       bankSize = 1024 * 16

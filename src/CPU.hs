@@ -18,13 +18,13 @@ import Control.Monad
 import Control.Monad.Except (liftEither)
 
 -- Executing instructions
-stepCPU :: CPU ()
+stepCPU :: CPU s ()
 stepCPU = do i <- getIR
              case i of
                Nothing -> eat8 >>= liftEither . decodeOp >>= exec
                Just m -> handleIR m
 
-handleIR :: Interrupt -> CPU ()
+handleIR :: Interrupt -> CPU s ()
 handleIR i = do
   iF <- sI -- Interrupt disable flag
   case iF of
@@ -40,7 +40,7 @@ handleIR i = do
           getPS >>= pushStack
           ind a >>= setPC
 
-exec :: OpCode -> CPU ()
+exec :: OpCode -> CPU s ()
 exec (op,a) = case op of
     LDA -> pnt a >>= lda
     LDX -> pnt a >>= ldx
@@ -99,12 +99,12 @@ exec (op,a) = case op of
     RTI -> rti
     BRK -> setIR IRQ
 
-pnt :: AddrMode -> CPU Word8
+pnt :: AddrMode -> CPU s Word8
 pnt Imm = eat8
 pnt Acc = getA
 pnt am = resolve am >>= readRAM
 
-resolve :: AddrMode -> CPU Word16
+resolve :: AddrMode -> CPU s Word16
 resolve Z  = eat8 >>= zp
 resolve Zx = eat8 >>= zpX
 resolve Zy = eat8 >>= zpY
@@ -117,12 +117,12 @@ resolve XInd = eat8 >>= ixIn
 resolve IndY = eat8 >>= inIx
 resolve Rel  = eat8 >>= rel . toS8
 
-resolveRel :: AddrMode -> CPU Int8
+resolveRel :: AddrMode -> CPU s Int8
 resolveRel Rel = toS8 <$> eat8
 resolveRel _ = cpuErr "Cannot resolve relative address in that mode"
 
 -- Instructions that take both accumulator and memory as args
-mutRef :: AddrMode -> Op -> (Word8 -> CPU Word8) -> CPU ()
+mutRef :: AddrMode -> Op -> (Word8 -> CPU s Word8) -> CPU s ()
 mutRef Acc _ f = do ra <- getA
                     f ra >>= setA
 mutRef Imm op _  = cpuErr $ concat ["Cannot mutate immediate address "
