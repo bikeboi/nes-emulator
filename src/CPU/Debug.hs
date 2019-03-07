@@ -27,7 +27,7 @@ runDebugger to start file = do
   bytes <- B.readFile file
   mem <- initMem
   (Right (a,log),w) <- runCPU mem $ runCPULog
-    $ do lift $ loadROM bytes >> setProg start
+    $ do lift $ loadROM bytes >> setPC   start
          forM [0..to] $ const $ execWithLogging stepCPU
   mapM_ print log
 
@@ -42,12 +42,12 @@ runCPULog = runWriterT
 
 execWithLogging :: CPU () -> CPULog ()
 execWithLogging ca = pass $ do
-  (a,x,y,s,p) <- lift $ liftM5 (,,,,) regA regX regY stack prog
+  (a,x,y,s,p) <- lift $ liftM5 (,,,,) getA getX getY getSP getPC
   byte <- lift $ readRAM p
   op <- lift $ liftEither $ decodeOp byte
   val <- catchError (lift ca) logCPUErr
   return (val,(++ [logFmt (a,x,y) s p op]))
-    where logCPUErr e = pass $ return ((), (++[e]))
+    where logCPUErr e = pass $ rP
 
 type Registers = (Word8,Word8,Word8)
 type StackPtr  = Word8

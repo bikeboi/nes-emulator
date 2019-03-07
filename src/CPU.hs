@@ -4,8 +4,9 @@ module CPU (exec,stepCPU) where
 import Prelude hiding (and)
 import Debug.Trace
 
-import Util           
+import Util
 import CPU.Internal
+import CPU.AddressMode
 import CPU.OpCode
 import CPU.Decode
 
@@ -18,13 +19,13 @@ import Control.Monad.Except (liftEither)
 
 -- Executing instructions
 stepCPU :: CPU ()
-stepCPU = do i <- interrupt
+stepCPU = do i <- getIR
              case i of
                Nothing -> eat8 >>= liftEither . decodeOp >>= exec
-               Just m -> handleInterrupt m
+               Just m -> handleIR m
 
-handleInterrupt :: Interrupt -> CPU ()
-handleInterrupt i = do
+handleIR :: Interrupt -> CPU ()
+handleIR i = do
   iF <- sI -- Interrupt disable flag
   case iF of
     True -> if i == NMI then clrI >> jumpTo 0xFFFA
@@ -33,11 +34,11 @@ handleInterrupt i = do
   where iLoc IRQ = 0xFFFE
         iLoc RST = 0xFFFC
         jumpTo a = do
-          p <- prog
+          p <- getPC
           let (l,h) = (low p,high p)
           pushStack h >> pushStack l
-          status >>= pushStack
-          ind a >>= setProg
+          getPS >>= pushStack
+          ind a >>= setPC
 
 exec :: OpCode -> CPU ()
 exec (op,a) = case op of
@@ -96,11 +97,11 @@ exec (op,a) = case op of
     SED -> return () -- Do nothing
     NOP -> nop
     RTI -> rti
-    BRK -> setInterrupt IRQ
+    BRK -> setIR IRQ
 
 pnt :: AddrMode -> CPU Word8
 pnt Imm = eat8
-pnt Acc = regA
+pnt Acc = getA
 pnt am = resolve am >>= readRAM
 
 resolve :: AddrMode -> CPU Word16
@@ -122,14 +123,13 @@ resolveRel _ = cpuErr "Cannot resolve relative address in that mode"
 
 -- Instructions that take both accumulator and memory as args
 mutRef :: AddrMode -> Op -> (Word8 -> CPU Word8) -> CPU ()
-mutRef Acc _ f = do ra <- regA
+mutRef Acc _ f = do ra <- getA
                     f ra >>= setA
 mutRef Imm op _  = cpuErr $ concat ["Cannot mutate immediate address "
                                     ,show op," "
                                     ,show Imm]
-                  
+
 mutRef Impl op _ = cpuErr $ "Cannot mutate implied address " ++ show op
 mutRef am _ f = do a <- resolve am
                    val <- readRAM a
                    f val >>= writeRAM a
-

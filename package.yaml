@@ -8,6 +8,7 @@ dependencies:
   - vector
   - mtl
   - transformers
+  - microlens-platform
   - containers
   - stm
 
@@ -23,13 +24,15 @@ executables:
       # CPU
       - CPU
       - CPU.ROM
+      - CPU.Debug
       - CPU.Internal
       - CPU.OpCode
+      - CPU.AddressMode
       - CPU.Decode
-      - CPU.Debug
 
       # PPU
       - PPU.Render
+      - PPU.Internal
 
       # Memory
       - Memory

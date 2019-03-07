@@ -14,7 +14,7 @@ module CPU.OpCode (
   , brk, nop, rti) where
 
 import Prelude hiding (and)
-  
+
 import CPU.Internal
 import Util
 import Data.Bits hiding (bit)
@@ -22,7 +22,7 @@ import Data.Word
 import Data.Int
 import Control.Monad (join)
 
--- Loading 
+-- Loading
 lda,ldx,ldy :: Word8 -> CPU ()
 lda x = negZero x >> setA x
 ldx x = negZero x >> setX x
@@ -30,25 +30,25 @@ ldy x = negZero x >> setY x
 
 -- Storing
 sta,stx,sty :: Word16 -> CPU ()
-sta a = regA >>= writeRAM a
-stx a = regX >>= writeRAM a
-sty a = regY >>= writeRAM a
+sta a = getA >>= writeRAM a
+stx a = getX >>= writeRAM a
+sty a = getY >>= writeRAM a
 
 -- Register Transfers
 tax,tay,txa,tya,tsx,txs :: CPU ()
-tax = regA >>= setX
-tay = regA >>= setY
-txa = regX >>= setA
-tya = regY >>= setA
-tsx = stack >>= setX
-txs = regX >>= setStack
+tax = getA >>= setX
+tay = getA >>= setY
+txa = getX >>= setA
+tya = getY >>= setA
+tsx = getSP >>= setX
+txs = getX >>= setSP
 
 -- Stack operations
 pha,php,pla,plp :: CPU ()
-pha = regA >>= pushStack
-php = status >>= pushStack
+pha = getA >>= pushStack
+php = getPS >>= pushStack
 pla = popStack >>= setA
-plp = popStack >>= setStatus
+plp = popStack >>= setPS
 
 -- Logical operations
 and,eor,ora,bit :: Word8 -> CPU ()
@@ -56,14 +56,14 @@ and x = logical (.&. x)
 eor x = logical (xor x)
 ora x = logical (.|. x)
 bit x = do
-  res <- regA >>= return . (.&. x)
-  if testBit res 7 then setV else clrV 
+  res <- getA >>= return . (.&. x)
+  if testBit res 7 then setV else clrV
   negZero res
-  
+
 -- Arithmetic
 adc, sbc :: Word8 -> CPU ()
-adc x = do a <- regA
-           c <- (.&. 0x01) <$> status
+adc x = do a <- getA
+           c <- (.&. 0x01) <$> getPS
            let ovf = ovfAdd x a .|. ovfAdd (x+a) c
                carries = carry a x || carry (x+a) 1
                res = x + a + c
@@ -71,8 +71,8 @@ adc x = do a <- regA
            if carries then setC else clrC
            negZero res >> setA res
 
-sbc x = do a <- regA
-           c <- complement . (.&. 0x01) <$> status
+sbc x = do a <- getA
+           c <- complement . (.&. 0x01) <$> getPS
            let ovf = ovfSub x a || ovfSub (x-a) c
                carries = not ovf
                res = x - a - c
@@ -81,14 +81,14 @@ sbc x = do a <- regA
            negZero res >> setA res
 
 cmp, cpx, cpy :: Word8 -> CPU ()
-cmp x = regA >>= comparison x
-cpx x = regX >>= comparison x
-cpy x = regY >>= comparison x
+cmp x = getA >>= comparison x
+cpx x = getX >>= comparison x
+cpy x = getY >>= comparison x
 
 -- Increments
 inc :: Word16 -> CPU ()
 inc a = readRAM a >>= writeRAM a . (+1)
-  
+
 inx, iny :: CPU ()
 inx = mutX (+1)
 iny = mutY (+1)
@@ -128,18 +128,18 @@ ror x = let roted = x .>>. 1
 
 -- Jumps
 jmp, jsr :: Word16 -> CPU ()
-jmp a = mutProg (const a)
+jmp a = mutPC (const a)
 
-jsr a = do p <- (\i -> i - 1) <$> prog
+jsr a = do p <- (\i -> i - 1) <$> getPC
            let hi = high p
                lo = low p
            pushStack hi
            pushStack lo
-           mutProg (const a)
+           mutPC (const a)
 
 rts :: CPU ()
 rts = do v <- lendian <$> popStack <*> popStack
-         mutProg (const (v+1))
+         mutPC (const (v+1))
 
 -- Branching
 bcc, bcs, bne, beq, bpl, bmi, bvc, bvs :: Int8 -> CPU ()
@@ -165,11 +165,11 @@ sei = setI
 
 -- Misc.
 brk, nop, rti :: CPU ()
-brk = error "End of program"
+brk = error "End of getPCram"
 nop = return ()
-rti = do popStack >>= setStatus
+rti = do popStack >>= setPS
          a <- lendian <$> popStack <*> popStack
-         mutProg (const a)
+         mutPC (const a)
 
 -- Helpers
 negZero :: Word8 -> CPU ()
@@ -184,11 +184,11 @@ comparison x y = do
 
 branch :: Int8 -> Bool -> CPU ()
 branch a b = if b
-             then mutProg (to16 . (+ toS16 a) . toS16)
+             then mutPC (to16 . (+ toS16 a) . toS16)
              else return ()
 
 logical :: (Word8 -> Word8) -> CPU ()
-logical f = do res <- regA >>= return . f
+logical f = do res <- getA >>= return . f
                negZero res >> setA res
 
 ovfAdd :: Word8 -> Word8 -> Bool

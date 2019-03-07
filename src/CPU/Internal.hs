@@ -1,14 +1,16 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards, BinaryLiterals #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving
+             , TemplateHaskell
+             , RecordWildCards
+             , BinaryLiterals
+             , RankNTypes #-}
 
 module CPU.Internal (
   Processor, Interrupt(..)
-  , CPU, runCPU, procc, cpuErr
+  , CPU, runCPU, proccessor, cpuErr
   , readRAM, writeRAM, loadChunkRAM
-  , zp, zpX, zpY, ab, abX, abY
-  , ind, inIx, ixIn, rel
-  , regA, regX, regY, stack, status, prog, interrupt
-  , mutA, mutX, mutY, mutStack, mutStatus, mutProg
-  , setA, setX, setY, setStack, setStatus, setProg, setInterrupt
+  , getA, getX, getY, getSP, getPS, getPC, getIR
+  , mutA, mutX, mutY, mutSP, mutPS, mutPC
+  , setA, setX, setY, setSP, setPS, setPC, setIR
   , pushStack, popStack
   , eat8, eat16
   , setN, setV, setB, setI, setZ, setC
@@ -23,6 +25,7 @@ import Data.Bits hiding (bit)
 import Data.Monoid (mconcat)
 import qualified Data.ByteString as B
 
+import Lens.Micro.Platform
 import Control.Monad.ST
 import Control.Monad.Reader
 import Control.Monad.Except
@@ -31,47 +34,36 @@ import Control.Monad.IO.Class (liftIO)
 
 -- Data Types
 data Processor =
-  Processor { _status :: Word8
-            , _regA :: Word8
-            , _regX :: Word8
-            , _regY :: Word8
-            , _stack :: Word8
-            , _prog :: Word16
-            , _interrupt :: Maybe Interrupt } deriving Eq
-
-instance Show Processor where
-  show Processor{..} = mconcat . map (\(a,b) -> a ++ b ++ " ") $
-                       [("A:", show16 _regA)
-                       ,("X:", show16 _regX)
-                       ,("Y:", show16 _regY)
-                       ,("PC:", showBig16 _prog)
-                       ,("SP:", show16 _stack)
-                       ,("STAT: ", show2 _status)]
+  Processor { _ps :: Word8
+            , _a  :: Word8
+            , _x  :: Word8
+            , _y  :: Word8
+            , _sp :: Word8
+            , _pc :: Word16
+            , _ir :: Maybe Interrupt } deriving Eq
 
 data Interrupt = NMI | RST | IRQ deriving (Eq, Show)
 
+makeLenses ''Processor
+
+instance Show Processor where
+  show Processor{..} = mconcat . map (\(a,b) -> a ++ b ++ " ") $
+                       [("A:", show16 _a)
+                       ,("X:", show16 _x)
+                       ,("Y:", show16 _y)
+                       ,("PC:", showBig16 _pc)
+                       ,("SP:", show16 _sp)
+                       ,("STAT: ", show2 _ps)]
+
 initProcessor :: Processor
 initProcessor =
-  Processor { _status = 0b00000100
-            , _regA   = 0x00
-            , _regX   = 0x00
-            , _regY   = 0x00
-            , _stack  = 0xFD
-            , _prog   = 0x6000
-            , _interrupt = Nothing }
-
-modStatus, modA, modX, modY, modStack :: (Word8 -> Word8) -> Processor -> Processor
-modStatus f p@Processor{..} = p { _status = f _status }
-modA f p@Processor{..} = p { _regA = f _regA }
-modX f p@Processor{..} = p { _regX = f _regX }
-modY f p@Processor{..} = p { _regY = f _regY }
-modStack f p@Processor{..} = p { _stack = f _stack }
-
-modProg :: (Word16 -> Word16) -> Processor -> Processor
-modProg f p@Processor{..} = p { _prog = f _prog }
-
-setInterrupt' :: Maybe Interrupt -> Processor -> Processor
-setInterrupt' m p = p { _interrupt = m }
+  Processor { _ps = 0b00000100
+            , _a   = 0x00
+            , _x   = 0x00
+            , _y   = 0x00
+            , _sp  = 0xFD
+            , _pc   = 0x6000
+            , _ir = Nothing }
 
 -- The CPU Monad
 newtype CPU a =
@@ -89,16 +81,14 @@ cpuErr :: String -> CPU a
 cpuErr = throwError
 
 -- Combinators Galore
-procc :: CPU Processor
-procc = get
+proccessor :: CPU Processor
+proccessor = get
 
 -- Interrupts
-setInterrupt :: Interrupt -> CPU ()
-setInterrupt NMI = procc >>= put . setInterrupt' (Just NMI)
-setInterrupt int = do i <- sI
-                      case i of
-                        True -> return ()
-                        False -> procc >>= put . setInterrupt' (Just int)
+setIR :: Interrupt -> CPU ()
+setIR NMI = setIR NMI
+setIR ir = do i <- sI
+              if i then return () else setIR ir
 
 -- Memory
 readRAM :: Word16 -> CPU Word8
@@ -114,64 +104,66 @@ loadChunkRAM b s = do mem <- ask
                       liftIO $ loadChunk b s mem
 
 -- General CPU access
-status, regX, regY, regA, stack :: CPU Word8
-status = _status <$> procc
-regA   = _regA <$> procc
-regX   = _regX <$> procc
-regY   = _regY <$> procc
-stack  = _stack <$> procc
+getP :: SimpleGetter Processor a -> CPU a
+getP s = view s <$> proccessor
 
-prog :: CPU Word16
-prog = _prog <$> procc
+getPS, getX, getY, getA, getSP :: CPU Word8
+getPS  = getP ps
+getA   = getP a
+getX   = getP x
+getY   = getP y
+getSP  = getP sp
 
-interrupt :: CPU (Maybe Interrupt)
-interrupt = _interrupt <$> procc
+getPC :: CPU Word16
+getPC = getP pc
+
+getIR :: CPU (Maybe Interrupt)
+getIR = getP ir
 
 -- General cpu mods
-mutReg :: ((a -> a) -> Processor -> Processor) -> (a -> a) -> CPU ()
-mutReg modf f = modify (\pr -> modf f pr)
+mutP :: ASetter' Processor a -> (a -> a) -> CPU ()
+mutP = (%=)
 
-mutA, mutX, mutY, mutStack, mutStatus :: (Word8 -> Word8) -> CPU ()
-mutA = mutReg modA
-mutX = mutReg modX
-mutY = mutReg modY
-mutStack = mutReg modStack
-mutStatus = mutReg modStatus
+mutA, mutX, mutY, mutSP, mutPS :: (Word8 -> Word8) -> CPU ()
+mutA = mutP a
+mutX = mutP x
+mutY = mutP y
+mutSP = mutP sp
+mutPS = mutP ps
 
-mutProg :: (Word16 -> Word16) -> CPU ()
-mutProg = mutReg modProg     
+mutPC :: (Word16 -> Word16) -> CPU ()
+mutPC = mutP pc
 
 -- Some specialized combinators
-setA, setX, setY, setStack, setStatus :: Word8 -> CPU ()
+setA, setX, setY, setSP, setPS :: Word8 -> CPU ()
 setA = mutA . const
 setX = mutX . const
 setY = mutY . const
-setStack = mutStack . const
-setStatus = mutStatus . const
+setSP = mutSP . const
+setPS = mutPS . const
 
-setProg :: Word16 -> CPU ()
-setProg = mutProg . const
+setPC :: Word16 -> CPU ()
+setPC = mutPC . const
+
+setIR' :: Interrupt -> CPU ()
+setIR' interrupt = ir ?= interrupt
 
 -- Stack-specific operations
 pushStack :: Word8 -> CPU ()
-pushStack v = do s <- stack
+pushStack v = do s <- getSP
                  writeRAM (0x0100 + to16 s) v
-                 mutStack (\i -> i - 1)
+                 mutSP (\i -> i - 1)
 
 popStack :: CPU Word8
-popStack = do mutStack (+1)
-              s <- stack
+popStack = do mutSP (+1)
+              s <- getSP
               readRAM (0x0100 + to16 s)
--- Program counter
-readProg :: CPU Word8
-readProg = prog >>= readRAM
-
-nextProg :: CPU ()
-nextProg = mutProg (+1)
 
 -- Get next instruction byte or arg at offset
 eat8 :: CPU Word8
-eat8 = readProg >>= \r -> nextProg >> return r
+eat8 = readPC >>= \r -> incPC >> return r
+  where readPC = getPC >>= readRAM
+        incPC = mutPC (+1)
 
 eat16 :: CPU Word16
 eat16 = do b1 <- eat8
@@ -180,32 +172,32 @@ eat16 = do b1 <- eat8
 
 -- Some flag helpers
 -- Note: The lack of abstraction below is simply
---       because I could not be bothered. 
+--       because I could not be bothered.
 stbit, clbit :: Bits a => Int -> a -> a
 stbit = flip setBit
 clbit = flip clearBit
 
 -- Set flag
 setN,setV,setB,setI,setZ,setC :: CPU ()
-setN = mutStatus $ stbit 7
-setV = mutStatus $ stbit 6
-setB = mutStatus $ stbit 4
-setI = mutStatus $ stbit 2
-setZ = mutStatus $ stbit 1
-setC = mutStatus $ stbit 0
+setN = mutPS $ stbit 7
+setV = mutPS $ stbit 6
+setB = mutPS $ stbit 4
+setI = mutPS $ stbit 2
+setZ = mutPS $ stbit 1
+setC = mutPS $ stbit 0
 
 -- Clear flag
 clrN, clrV, clrB, clrI, clrZ, clrC :: CPU ()
-clrN = mutStatus $ clbit 7
-clrV = mutStatus $ clbit 6
-clrB = mutStatus $ clbit 4
-clrI = mutStatus $ clbit 2
-clrZ = mutStatus $ clbit 1
-clrC = mutStatus $ clbit 0
+clrN = mutPS $ clbit 7
+clrV = mutPS $ clbit 6
+clrB = mutPS $ clbit 4
+clrI = mutPS $ clbit 2
+clrZ = mutPS $ clbit 1
+clrC = mutPS $ clbit 0
 
 -- Inspect flag
 sf :: Int -> CPU Bool
-sf i = flip testBit i <$> status
+sf i = flip testBit i <$> getPS
 
 sN,sV,sB,sI,sZ,sC :: CPU Bool
 sN = sf 7
@@ -214,45 +206,3 @@ sB = sf 4
 sI = sf 2
 sZ = sf 1
 sC = sf 0
-
--- Addressing Modes
-zp :: Word8 -> CPU Word16
-zp = return . to16
-
-zpIx :: Word8 -> Word8 -> CPU Word16
-zpIx x ix = return . to16 $ x + ix
-
-zpX, zpY :: Word8 -> CPU Word16
-zpX x = regX >>= zpIx x
-zpY x = regY >>= zpIx x
-
-rel :: Int8 -> CPU Word16
-rel a = do p <- prog
-           let lo = toS8 p + a
-           return $ (p .&. 0xFF00) + to16 lo
-
-ab :: Word16 -> CPU Word16
-ab = return
-
-abIx :: Word16 -> Word8 -> CPU Word16
-abIx a ix = return $ a + (to16 ix)
-
-abX, abY :: Word16 -> CPU Word16
-abX x = regX >>= abIx x
-abY x = regY >>= abIx x
-
-ind :: Word16 -> CPU Word16
-ind a = do let a' = (a .&. 0xFF00) + to16 (low a + 1)
-           b1 <- readRAM a
-           b2 <- readRAM a'
-           return $ lendian b1 b2
-
-ixIn :: Word8 -> CPU Word16
-ixIn a = do x <- regX
-            ind' . to16 $ a + x
-  where ind' addr = do b1 <- readRAM addr
-                       b2 <- readRAM $ addr+1
-                       return $ lendian b1 b2
-            
-inIx :: Word8 -> CPU Word16
-inIx a = ind (to16 a) >>= \aa -> fmap (\r -> to16 r + aa) regY 
