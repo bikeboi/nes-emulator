@@ -21,18 +21,15 @@ import Control.Monad.Except (liftEither)
 stepCPU :: CPU s ()
 stepCPU = do i <- getIR
              case i of
-               Nothing -> eat8 >>= liftEither . decodeOp >>= exec
-               Just m -> handleIR m
+               Just intrpt -> handleIR intrpt
+               Nothing -> execNextOp
+  where execNextOp = eat8 >>= exec . lookupCode
 
 handleIR :: Interrupt -> CPU s ()
-handleIR i = do
-  iF <- sI -- Interrupt disable flag
-  case iF of
-    True -> if i == NMI then clrI >> jumpTo 0xFFFA
-            else return ()
-    False -> clrI >> jumpTo (iLoc i)
+handleIR i = jumpTo (iLoc i)
   where iLoc IRQ = 0xFFFE
         iLoc RST = 0xFFFC
+        iLoc NMI = 0xFFFA
         jumpTo a = do
           p <- getPC
           let (l,h) = (low p,high p)
@@ -116,6 +113,7 @@ resolve Imm = cpuErr "Cannot dereference an immediate value"
 resolve XInd = eat8 >>= ixIn
 resolve IndY = eat8 >>= inIx
 resolve Rel  = eat8 >>= rel . toS8
+resolve Impl = cpuErr "what"
 
 resolveRel :: AddrMode -> CPU s Int8
 resolveRel Rel = toS8 <$> eat8

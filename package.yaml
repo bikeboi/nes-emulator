@@ -4,12 +4,18 @@ maintainer: bikeboi
 
 dependencies:
   - base
+
+  # Data
   - bytestring
   - vector
+  - containers
+  - array
+
+  # Abstraction
   - mtl
   - transformers
+  - recursion-schemes
   - microlens-platform
-  - containers
   - stm
 
   # Graphics
@@ -29,6 +35,7 @@ executables:
       - CPU.OpCode
       - CPU.AddressMode
       - CPU.Decode
+      - CPU.Sandbox
 
       # PPU
       - PPU.Render

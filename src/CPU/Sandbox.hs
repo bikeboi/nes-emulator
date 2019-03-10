@@ -1,19 +1,18 @@
 {-# LANGUAGE BinaryLiterals, BangPatterns #-}
 
-module CPU.Decode(Op(..),AddrMode(..),lookupCode,OpCode) where
+module CPU.Sandbox where
 
 import qualified Data.Map.Strict as M
 import Data.Array
 import Data.Word
-import Data.List (transpose)
 import Data.Bits ((.&.))
+import CPU.Decode
 import Lens.Micro.Platform
 
 -- Main one
 lookupCode :: Word8 -> (Op,AddrMode)
 lookupCode = (,) <$> lookupOp <*> lookupAddr
 
-type OpCode = (Op,AddrMode)
 -- Lookups
 lookupOp :: Word8 -> Op
 lookupOp = lookup' opMap
@@ -26,7 +25,7 @@ lookup' :: M.Map Word8 (Array Word8 a) -> Word8 -> a
 lookup' mp b = let arr = mp M.! (b .&. 3)
                in arr ! b
 -- MAPS
-addrMap = mkMap $ map transpose [am0,am1,am2,am3] -- Mm yum, math
+addrMap = mkMap [am0,am1,am2,am3]
 opMap   = mkMap [op0,op1,op2,op3]
 
 mkMap :: [Matrix a] -> M.Map Word8 (Array Word8 a)
@@ -38,6 +37,7 @@ matToArray om start = array (0,255) $ concat $
   zipWith (\s r -> map (_1 %~ (+s)) r) [0x00, 0x20 .. 0xE0] $
   map (zip [start, start+4 .. start+28]) om
 
+
 -- MATRICES
 -- Address Matrices
 type Matrix a = [[a]]
@@ -46,8 +46,6 @@ am0, am1, am2, am3 :: Matrix AddrMode
 am0 =
   [[Impl,A,Impl,Impl] ++ replicate 4 Imm
   ,replicate 8 Z
-  ,replicate 8 Impl
-  ,[A,A,A,Ind,A,A,A,A]
   ,replicate 8 Rel
   ,replicate 8 Zx
   ,replicate 8 Impl
@@ -59,7 +57,7 @@ am1 = map (replicate 8) $
 am2 =
   [replicate 4 Impl ++ replicate 4 Imm
   ,replicate 8 Z
-  ,replicate 4 Acc ++ replicate 4 Impl
+  ,replicate 8 Impl
   ,replicate 8 A
   ,replicate 8 Impl
   ,replicate 4 Zx ++ replicate 2 Zy ++ [Zx,Zx]
@@ -112,33 +110,3 @@ op3 =
   ,[LAX, LAX, LAX, LAX, LAX, LAX, LAS, LAX]
   ,[DCP, DCP, AXS, DCP, DCP, DCP, DCP, DCP]
   ,[ISC, ISC, SBC, ISC, ISC, ISC, ISC, ISC]]
-
--- Types
-data AddrMode =
-    Z | Zx | Zy
-  | A | Ax | Ay
-  | Ind
-  | Imm
-  | XInd | IndY
-  | Impl
-  | Rel
-  | Acc
-  deriving (Eq, Show)
-
-data Op =
-    LDA | LDX | LDY | STA | STX | STY       -- Loading and storage
-  | TAX | TAY | TXA | TYA | TSX | TXS       -- Regoster transfers
-  | PHA | PHP | PLA | PLP                   -- Stack operayions
-  | AND | EOR | ORA | BIT                   -- Logical operaionts
-  | ADC | SBC | CMP | CPX | CPY             -- Arithmetic
-  | INC | INX | INY | DEC | DEX | DEY       -- Increments and decrements
-  | ASL | LSR | ROL | ROR                   -- Bit shifts
-  | JMP | JSR | RTS                         -- Control flow
-  | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS -- Branching
-  | CLC | CLI | CLV | CLD | SEC | SEI | SED     -- Flag control
-  | BRK | NOP | RTI
-  -- Unofficial Opcodes
-  | SLO | RLA | SRE | RRA | SAX | LAX | DCP | ISC
-  | ANC | ALR | ARR | XAA | AXS | AHX | SHY | SHX
-  | TAS | LAS | STP
-  deriving (Eq, Show, Ord)
