@@ -38,13 +38,15 @@ handleIR i = jumpTo (iLoc i)
           ind a >>= setPC
 
 exec :: OpCode -> CPU s ()
-exec (op,a) = case op of
-    LDA -> pnt a >>= lda
-    LDX -> pnt a >>= ldx
-    LDY -> pnt a >>= ldy
-    STA -> resolve a >>= sta
-    STX -> resolve a >>= stx
-    STY -> resolve a >>= sty
+exec (op,am) = do
+  a <- fetchArg am
+  case op of
+    LDA -> lda =<< arg8 a
+    LDX -> ldx =<< arg8 a
+    LDY -> ldy =<< arg8 a
+    STA -> sta =<< arg16 a
+    STX -> stx =<< arg16 a
+    STY -> sty =<< arg16 a
     TAX -> tax
     TAY -> tay
     TXA -> txa
@@ -55,36 +57,36 @@ exec (op,a) = case op of
     PHP -> php
     PLA -> pla
     PLP -> plp
-    AND -> pnt a >>= and
-    EOR -> pnt a >>= eor
-    ORA -> pnt a >>= ora
-    BIT -> pnt a >>= bit
-    ADC -> pnt a >>= adc
-    SBC -> pnt a >>= sbc
-    CMP -> pnt a >>= cmp
-    CPX -> pnt a >>= cpx
-    CPY -> pnt a >>= cpy
-    INC -> resolve a >>= inc
+    AND -> and =<< arg8 a
+    EOR -> eor =<< arg8 a
+    ORA -> ora =<< arg8 a
+    BIT -> bit =<< arg8 a
+    ADC -> adc =<< arg8 a
+    SBC -> sbc =<< arg8 a
+    CMP -> cmp =<< arg8 a
+    CPX -> cpx =<< arg8 a
+    CPY -> cpy =<< arg8 a
+    INC -> inc =<< arg16 a
     INX -> inx
     INY -> iny
-    DEC -> resolve a >>= dec
+    DEC -> dec =<< arg16 a
     DEX -> dex
     DEY -> dey
-    ASL -> mutRef a op asl
-    LSR -> mutRef a op lsr
-    ROL -> mutRef a op rol
-    ROR -> mutRef a op ror
-    JMP -> resolve a >>= jmp
-    JSR -> resolve a >>= jsr
+    ASL -> mutRef am op asl
+    LSR -> mutRef am op lsr
+    ROL -> mutRef am op rol
+    ROR -> mutRef am op ror
+    JMP -> jmp =<< arg16 a
+    JSR -> jsr =<< arg16 a
     RTS -> rts
-    BCC -> resolveRel a >>= bcc
-    BCS -> resolveRel a >>= bcs
-    BEQ -> resolveRel a >>= beq
-    BMI -> resolveRel a >>= bmi
-    BNE -> resolveRel a >>= bne
-    BPL -> resolveRel a >>= bpl
-    BVC -> resolveRel a >>= bvc
-    BVS -> resolveRel a >>= bvs
+    BCC -> bcc =<< arg16 a
+    BCS -> bcs =<< arg16 a
+    BEQ -> beq =<< arg16 a
+    BMI -> bmi =<< arg16 a
+    BNE -> bne =<< arg16 a
+    BPL -> bpl =<< arg16 a
+    BVC -> bvc =<< arg16 a
+    BVS -> bvs =<< arg16 a
     CLC -> clc
     CLI -> cli
     CLV -> clv
@@ -92,14 +94,28 @@ exec (op,a) = case op of
     SEC -> sec
     SEI -> sei
     SED -> return () -- Do nothing
-    NOP -> nop
+    NOP -> return () -- Do nothing
     RTI -> rti
     BRK -> setIR IRQ
+    o   -> cpuErr $ "Unrecognized opcode: " ++ show o
 
-pnt :: AddrMode -> CPU s Word8
-pnt Imm = eat8
-pnt Acc = getA
-pnt am = resolve am >>= readRAM
+fetchArg :: AddrMode -> CPU s (Either Word16 Word8)
+fetchArg Impl = return . Right $ 0x00 -- This will never be used anyway
+fetchArg Acc  = Right <$> getA
+fetchArg Imm  = Right <$> eat8
+fetchArg Rel  = eat8 >>= rel . toS8 >>= return . Left
+fetchArg x    = Left  <$> resolve x
+
+arg8 :: Either Word16 Word8 -> CPU s Word8
+arg8 (Left x)  = readRAM x
+arg8 (Right x) = return x
+
+arg16 :: Either Word16 Word8 -> CPU s Word16
+arg16 (Right x) = cpuErr "How did you mess this up so bad m8"
+arg16 (Left x)  = return x
+
+pnt :: Word16 -> CPU s Word8
+pnt addr = readRAM addr
 
 resolve :: AddrMode -> CPU s Word16
 resolve Z  = eat8 >>= zp
@@ -112,12 +128,7 @@ resolve Ind = eat16 >>= ind
 resolve Imm = cpuErr "Cannot dereference an immediate value"
 resolve XInd = eat8 >>= ixIn
 resolve IndY = eat8 >>= inIx
-resolve Rel  = eat8 >>= rel . toS8
 resolve Impl = cpuErr "what"
-
-resolveRel :: AddrMode -> CPU s Int8
-resolveRel Rel = toS8 <$> eat8
-resolveRel _ = cpuErr "Cannot resolve relative address in that mode"
 
 -- Instructions that take both accumulator and memory as args
 mutRef :: AddrMode -> Op -> (Word8 -> CPU s Word8) -> CPU s ()

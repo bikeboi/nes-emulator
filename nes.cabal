@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: adcca5d04985c46fe531b3e174c28b8a6d1bcc174d500164921b4bec1caea2c0
+-- hash: 1443bbcfaad6913f3c67abb1bec60e4456c90abd41d443b3ca082d79606bdd77
 
 name:           nes
 version:        0.1.0.0
@@ -33,6 +33,7 @@ executable nes
     , base
     , bytestring
     , containers
+    , freer-simple
     , linear
     , microlens-platform
     , mtl
@@ -71,6 +72,7 @@ test-suite spec
     , base
     , bytestring
     , containers
+    , freer-simple
     , hspec
     , linear
     , microlens-platform

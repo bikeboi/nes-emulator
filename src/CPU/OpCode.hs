@@ -142,7 +142,7 @@ rts = do v <- lendian <$> popStack <*> popStack
          mutPC (const (v+1))
 
 -- Branching
-bcc, bcs, bne, beq, bpl, bmi, bvc, bvs :: Int8 -> CPU s ()
+bcc, bcs, bne, beq, bpl, bmi, bvc, bvs :: Word16 -> CPU s ()
 bcc a = not <$> sC >>= branch a
 bcs a = sC >>= branch a
 bne a = not <$> sZ >>= branch a
@@ -182,9 +182,9 @@ comparison x y = do
   if x == y then setZ else clrZ
   if x <  y then setN else clrN
 
-branch :: Int8 -> Bool -> CPU s ()
+branch :: Word16 -> Bool -> CPU s ()
 branch a b = if b
-             then mutPC (to16 . (+ toS16 a) . toS16)
+             then setPC a
              else return ()
 
 logical :: (Word8 -> Word8) -> CPU s ()

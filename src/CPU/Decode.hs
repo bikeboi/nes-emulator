@@ -1,5 +1,3 @@
-{-# LANGUAGE BinaryLiterals, BangPatterns #-}
-
 module CPU.Decode(Op(..),AddrMode(..),lookupCode,OpCode) where
 
 import qualified Data.Map.Strict as M

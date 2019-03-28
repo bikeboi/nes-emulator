@@ -1,112 +1,118 @@
-{-# LANGUAGE BinaryLiterals, BangPatterns #-}
+{-# LANGUAGE GADTs, FlexibleContexts, DataKinds, TypeOperators, RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module CPU.Sandbox where
 
-import qualified Data.Map.Strict as M
-import Data.Array
-import Data.Word
-import Data.Bits ((.&.))
+import Util
 import CPU.Decode
+import Control.Monad.Freer
+import Control.Monad.Freer.TH
+import Control.Monad.Freer.Internal (handleRelayS)
+import Control.Monad.Freer.State
+import Data.Word
 import Lens.Micro.Platform
+import qualified Data.Vector as V
 
--- Main one
-lookupCode :: Word8 -> (Op,AddrMode)
-lookupCode = (,) <$> lookupOp <*> lookupAddr
+---------
+-- PPU --
+---------
+data PPUCtl a where
+  WriteCTL :: Word8 -> PPUCtl ()
+  --
+  ReadSTAT :: PPUCtl Word8
+  --
+  WriteMask :: Word8 -> PPUCtl ()
+  --
+  WriteScroll :: Word8 -> PPUCtl ()
+  --
+  WritePPUAddr :: Word8 -> PPUCtl ()
+  WritePPUData :: Word8 -> PPUCtl ()
+  ReadPPUData :: PPUCtl Word8
+  --
+  WriteOAMAddr :: Word8 -> PPUCtl ()
+  WriteOAMData :: Word8 -> PPUCtl ()
+  ReadOAMData :: PPUCtl Word8
 
--- Lookups
-lookupOp :: Word8 -> Op
-lookupOp = lookup' opMap
+makeEffect ''PPUCtl
 
-lookupAddr :: Word8 -> AddrMode
-lookupAddr = lookup' addrMap
+-- Handle PPU Stuff
+type IOBus = Word8
 
--- General lookup
-lookup' :: M.Map Word8 (Array Word8 a) -> Word8 -> a
-lookup' mp b = let arr = mp M.! (b .&. 3)
-               in arr ! b
--- MAPS
-addrMap = mkMap [am0,am1,am2,am3]
-opMap   = mkMap [op0,op1,op2,op3]
+runPPUCtl :: Eff (PPUCtl ': r) a -> Eff r (a,[String])
+runPPUCtl = runState [] . reinterpret reint
+  where reint :: PPUCtl ~> Eff (State [String] ': r)
+        reint (WriteCTL v) = modify $ logg "WriteCTL"
+        reint ReadSTAT = modify (logg "ReadStat") >> return 0
+        reint (WritePPUAddr _) = modify $ logg "WriteAddr"
+        reint (WritePPUData _) = modify $ logg "WriteData"
+        reint ReadPPUData = modify (logg "ReadData") >> return 0
+        reint _ = undefined
+        --
+        logg :: String -> [String] -> [String]
+        logg = (++) . (:[])
 
-mkMap :: [Matrix a] -> M.Map Word8 (Array Word8 a)
-mkMap m = M.fromList $
-          zipWith (\i a -> (i, matToArray a i)) [0 .. 3] m
+---------
+-- RAM --
+---------
+type Memory = V.Vector Word8
 
-matToArray :: Matrix a -> Word8 -> Array Word8 a
-matToArray om start = array (0,255) $ concat $
-  zipWith (\s r -> map (_1 %~ (+s)) r) [0x00, 0x20 .. 0xE0] $
-  map (zip [start, start+4 .. start+28]) om
+data RAM a where
+  ReadRAM :: Word16 -> RAM Word8
+  WriteRAM :: Word16 -> Word8 -> RAM ()
 
+makeEffect ''RAM
 
--- MATRICES
--- Address Matrices
-type Matrix a = [[a]]
+-- We need to interpose RAM stuff with PPU Control
+ppuControl :: forall a r. (Member RAM r, Member PPUCtl r)
+           => Eff r a
+           -> Eff r a
+ppuControl req = interpose go req
+  where go :: RAM ~> Eff r
+        go (ReadRAM a) = if a `elem` [0x2002,0x2004,0x2007]
+                         then mapRead a else readRAM a
+        go (WriteRAM a v) = if a `elem` [0x2000,0x2001,0x2003,0x2005
+                                        ,0x2004,0x2006,0x2007]
+                            then mapWrite a v else writeRAM a v
+        --
+        mapRead :: Word16 -> Eff r Word8
+        mapRead 0x2002 = readSTAT    -- Read PPU Status
+        mapRead 0x2004 = readOAMData -- Read OAM Data
+        mapRead 0x2007 = readPPUData -- Read PPU Data
+        --
+        mapWrite :: Word16 -> Word8 -> Eff r ()
+        mapWrite 0x2000 = writeCTL
+        mapWrite 0x2001 = writeMask    -- Write mask
+        mapWrite 0x2003 = writeOAMAddr -- Write OAM Address
+        mapWrite 0x2004 = writeOAMData -- Write OAM Data
+        mapWrite 0x2005 = writeScroll  -- Write scroll
+        mapWrite 0x2006 = writePPUAddr -- Write PPU Address
+        mapWrite 0x2007 = writePPUData -- Write PPU Data
 
-am0, am1, am2, am3 :: Matrix AddrMode
-am0 =
-  [[Impl,A,Impl,Impl] ++ replicate 4 Imm
-  ,replicate 8 Z
-  ,replicate 8 Rel
-  ,replicate 8 Zx
-  ,replicate 8 Impl
-  ,replicate 8 Ax]
+--
+runRAM :: forall a r. Eff (RAM ': r) a -> Eff r a
+runRAM req = handleRelayS initMem (const pure) go req
+  where go :: Memory -> RAM v -> (Memory -> v -> Eff r b) -> Eff r b
+        go m (ReadRAM a) f = f m (m V.! fromIntegral a)
+        go m (WriteRAM a v) f = f (m V.// [(fromIntegral a,v)]) ()
+        initMem = V.replicate 0xFFFF 0x0
 
-am1 = map (replicate 8) $
-  [XInd, Z, Imm, A, IndY, Zx, Ay, Ay]
+reflectRAM :: forall a r. Member RAM r => Eff r a -> Eff r a
+reflectRAM req = interpose go req
+  where go :: RAM ~> Eff r
+        go (ReadRAM a) = readRAM $ mirrorRAM a
+        go (WriteRAM a v) = writeRAM (mirrorRAM a) v
+        -- Mirroring Helpers
+        mirrorRAM = mirrorRAM1 . mirrorRAM2
+        mirrorRAM1 = (0x2000+) . mirror (0x2000,0x4000) 8
+        mirrorRAM2 = mirror (0x0000,0x8000) 0x8000
+        -- General mirroring
+        mirror r m v = if v `within` r then v `mod` m else v
+        -- Helper
+        within :: Word16 -> (Word16,Word16) -> Bool
+        within x (mn,mx) = x >= mn && x < mx
 
-am2 =
-  [replicate 4 Impl ++ replicate 4 Imm
-  ,replicate 8 Z
-  ,replicate 8 Impl
-  ,replicate 8 A
-  ,replicate 8 Impl
-  ,replicate 4 Zx ++ replicate 2 Zy ++ [Zx,Zx]
-  ,replicate 8 Impl
-  ,replicate 4 Ax ++ [Ay,Ay] ++ replicate 2 Ax]
-
-am3 = map (replicate 8) [XInd, Z, Imm, A, IndY]
-      ++ [replicate 4 Zx ++ [Zy,Zy,Zx,Zx]]
-      ++ [replicate 8 Ay]
-      ++ [replicate 4 Ax ++ [Ay,Ay,Ax,Ax]]
-
--- Operation Matrixes
-op0, op1, op2, op3 :: Matrix Op
-op0 =
-  [[BRK, NOP, PHP, NOP, BPL, NOP, CLC, NOP]
-  ,[JSR, BIT, PLP, BIT, BMI, NOP, SEC, NOP]
-  ,[RTI, NOP, PHA, JMP, BVC, NOP, CLI, NOP]
-  ,[RTS, NOP, PLA, JMP, BVS, NOP, SEI, NOP]
-  ,[NOP, STY, DEY, STY, BCC, STY, TYA, SHY]
-  ,[LDY, LDY, TAY, LDY, BCS, LDY, CLV, LDY]
-  ,[CPY, CPY, INY, CPY, BNE, NOP, CLD, NOP]
-  ,[CPX, CPX, INX, CPX, BEQ, NOP, SED, NOP]]
-
-op1 =
-  [replicate 8 ORA
-  ,replicate 8 AND
-  ,replicate 8 EOR
-  ,replicate 8 ADC
-  ,[STA, STA, NOP, STA, STA, STA, STA, STA]
-  ,replicate 8 LDA
-  ,replicate 8 CMP
-  ,replicate 8 SBC]
-
-op2 =
-  [[STP, ASL, ASL, ASL, STP, ASL, NOP, ASL]
-  ,[STP, ROL, ROL, ROL, STP, ROL, NOP, ROL]
-  ,[STP, LSR, LSR, LSR, STP, LSR, NOP, LSR]
-  ,[STP, ROR, ROR, ROR, STP, ROR, NOP, ROR]
-  ,[NOP, STX, TXA, STX, STP, STX, TXS, SHX]
-  ,[LDX, LDX, TAX, LDX, STP, LDX, TSX, LDX]
-  ,[NOP, DEC, DEX, DEC, STP, DEC, NOP, DEC]
-  ,[NOP, INC, NOP, INC, STP, INC, NOP, INC]]
-
-op3 =
-  [[SLO, SLO, ANC, SLO, SLO, SLO, SLO, SLO]
-  ,[RLA, RLA, ANC, RLA, RLA, RLA, RLA, RLA]
-  ,[SRE, SRE, ALR, SRE, SRE, SRE, SRE, SRE]
-  ,[RRA, RRA, ARR, RRA, RRA, RRA, RRA, RRA]
-  ,[SAX, SAX, XAA, SAX, AHX, SAX, TAS, AHX]
-  ,[LAX, LAX, LAX, LAX, LAX, LAX, LAS, LAX]
-  ,[DCP, DCP, AXS, DCP, DCP, DCP, DCP, DCP]
-  ,[ISC, ISC, SBC, ISC, ISC, ISC, ISC, ISC]]
+-- TEST AREA
+runNES :: Eff '[PPUCtl,RAM] a -> (a,[String])
+runNES = run . runRAM . runPPUCtl
+         . ppuControl . reflectRAM -- Hijacking writes and reads

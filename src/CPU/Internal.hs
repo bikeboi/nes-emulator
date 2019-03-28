@@ -1,15 +1,7 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving
-             , TemplateHaskell
-             , RecordWildCards
-             , BinaryLiterals
-             , GADTs
-             , TypeSynonymInstances
-             , MultiParamTypeClasses
-             , FlexibleInstances
-             , RankNTypes #-}
+{-# LANGUAGE TemplateHaskell, BinaryLiterals #-}
 
 module CPU.Internal (
-  Processor, Interrupt(..)
+  Processor, pPS, pA, pX, pY, pSP, pPC, Interrupt(..)
   , CPU, runCPU, proccessor, cpuErr
   , readRAM, writeRAM, loadChunkRAM, initRAM
   , getA, getX, getY, getSP, getPS, getPC, getIR
@@ -32,6 +24,7 @@ import qualified Data.ByteString as B
 import Lens.Micro.Platform
 import Control.Monad.ST
 import Control.Monad.Reader
+import Control.
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad.IO.Class (liftIO)
@@ -49,6 +42,15 @@ data Processor =
 data Interrupt = NMI | RST | IRQ deriving (Eq, Show)
 
 makeLenses ''Processor
+
+pPS, pA, pX, pY, pSP :: SimpleGetter Processor Word8
+pPC :: SimpleGetter Processor Word16
+pPS = ps
+pA  = a
+pX  = x
+pY  = y
+pSP = sp
+pPC = pc
 
 instance Show Processor where
   show Processor{..} = mconcat . map (\(a,b) -> a ++ b ++ " ") $
