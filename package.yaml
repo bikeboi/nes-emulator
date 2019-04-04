@@ -4,6 +4,7 @@ maintainer: bikeboi
 
 dependencies:
   - base
+  - raw-strings-qq
 
   # Data
   - bytestring
@@ -41,6 +42,7 @@ executables:
       # PPU
       - PPU.Render
       - PPU.Internal
+      - PPU.Sandbox
 
       # Memory
       - Memory

@@ -4,6 +4,7 @@
 
 module CPU.Sandbox where
 
+import PPU.Sandbox
 import Util
 import CPU.Decode
 import Control.Monad.Freer
@@ -14,33 +15,11 @@ import Data.Word
 import Lens.Micro.Platform
 import qualified Data.Vector as V
 
----------
--- PPU --
----------
-data PPUCtl a where
-  WriteCTL :: Word8 -> PPUCtl ()
-  --
-  ReadSTAT :: PPUCtl Word8
-  --
-  WriteMask :: Word8 -> PPUCtl ()
-  --
-  WriteScroll :: Word8 -> PPUCtl ()
-  --
-  WritePPUAddr :: Word8 -> PPUCtl ()
-  WritePPUData :: Word8 -> PPUCtl ()
-  ReadPPUData :: PPUCtl Word8
-  --
-  WriteOAMAddr :: Word8 -> PPUCtl ()
-  WriteOAMData :: Word8 -> PPUCtl ()
-  ReadOAMData :: PPUCtl Word8
-
-makeEffect ''PPUCtl
-
 -- Handle PPU Stuff
 type IOBus = Word8
 
-runPPUCtl :: Eff (PPUCtl ': r) a -> Eff r (a,[String])
-runPPUCtl = runState [] . reinterpret reint
+logPPUCtl :: Eff (PPUCtl ': r) a -> Eff r (a,[String])
+logPPUCtl = runState [] . reinterpret reint
   where reint :: PPUCtl ~> Eff (State [String] ': r)
         reint (WriteCTL v) = modify $ logg "WriteCTL"
         reint ReadSTAT = modify (logg "ReadStat") >> return 0
@@ -112,7 +91,42 @@ reflectRAM req = interpose go req
         within :: Word16 -> (Word16,Word16) -> Bool
         within x (mn,mx) = x >= mn && x < mx
 
--- TEST AREA
-runNES :: Eff '[PPUCtl,RAM] a -> (a,[String])
-runNES = run . runRAM . runPPUCtl
-         . ppuControl . reflectRAM -- Hijacking writes and reads
+-- CPU
+data Regs =
+  Regs { _cpuA :: Word8
+       , _cpuX :: Word8
+       , _cpuY :: Word8
+       , _cpuST :: Word8
+       , _cpuPC :: Word16
+       , _cpuIR :: Maybe Interrupt }
+  deriving (Eq, Show)
+
+data Interrupt = IRQ | NMI | RST deriving (Eq, Show)
+
+makeLenses ''Regs
+
+data CPU a where
+  StepCPU :: OpCode -> CPU a
+  ReadOp :: CPU OpCode
+
+makeEffect ''CPU
+
+runCPU :: forall a r. Member RAM r => Eff (CPU ': r) a -> Eff r (a,Regs)
+runCPU = runState initRegs . reinterpret go
+  where go :: CPU ~> Eff (State Regs ': r)
+        go ReadOp = do op <- get >>= fmap lookupCode . readRAM . (^. cpuPC)
+                       modify $ cpuPC +~ 1
+                       return op
+        go _ = undefined
+        initRegs = Regs 0 0 0 0 0x8000 Nothing
+
+-- BIG PICTURE
+runNES :: Eff '[CPU,PPUCtl,RAM] a -> (a,Regs,[String])
+runNES = merge3
+         . run
+         . runRAM     -- Big boi state change
+         . logPPUCtl  -- Execute CPU -> PPU interaction
+         . ppuControl -- Translates RAM reads and writes to PPUCTL commands
+         . reflectRAM -- Mirroring addresses (so crucial omg)
+         . runCPU
+  where merge3 ((a,b),c) = (a,b,c)

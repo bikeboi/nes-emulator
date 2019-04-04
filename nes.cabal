@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1443bbcfaad6913f3c67abb1bec60e4456c90abd41d443b3ca082d79606bdd77
+-- hash: a728dbb79a18a198404735c70e560f7d82b4f3d2fbee5c6035f8942df52ec8ee
 
 name:           nes
 version:        0.1.0.0
@@ -24,6 +24,7 @@ executable nes
       CPU.Sandbox
       PPU.Render
       PPU.Internal
+      PPU.Sandbox
       Memory
       Util
   hs-source-dirs:
@@ -37,6 +38,7 @@ executable nes
     , linear
     , microlens-platform
     , mtl
+    , raw-strings-qq
     , recursion-schemes
     , sdl2
     , stm
@@ -60,6 +62,7 @@ test-suite spec
       Memory
       PPU.Internal
       PPU.Render
+      PPU.Sandbox
       PPU.VRAM
       Util
       Paths_nes
@@ -77,6 +80,7 @@ test-suite spec
     , linear
     , microlens-platform
     , mtl
+    , raw-strings-qq
     , recursion-schemes
     , sdl2
     , stm

@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, BinaryLiterals #-}
+{-# LANGUAGE TemplateHaskell, BinaryLiterals, RankNTypes, RecordWildCards #-}
 
 module CPU.Internal (
   Processor, pPS, pA, pX, pY, pSP, pPC, Interrupt(..)
@@ -24,7 +24,6 @@ import qualified Data.ByteString as B
 import Lens.Micro.Platform
 import Control.Monad.ST
 import Control.Monad.Reader
-import Control.
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad.IO.Class (liftIO)

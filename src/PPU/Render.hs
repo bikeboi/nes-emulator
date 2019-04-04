@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 
 module PPU.Render
-  (render
-  ,Draw, DrawEnv
-  ,liftDraw
-  ,pixel
-  ,inColor
+  ( render
+  , Draw, DrawEnv
+  , liftDraw
+  , pxScale
+  , square
+  , pixel
+  , inColor
+  , mkColor
   )where
 
 import SDL
@@ -19,29 +22,28 @@ import Foreign.C.Types(CInt)
 
 type PixelScale = CInt
 
-render :: PixelScale -> IO ()
-render scale = do
+render :: PixelScale -> Draw () -> IO ()
+render scale dact = do
   initializeAll
   let conf =
         defaultWindow { windowInitialSize = V2 (256*scale) (240*scale) }
   window <- createWindow "SampleApp" conf
-  render <- createRenderer window (-1) defaultRenderer
-  appLoop (render,scale)
-
-appLoop :: DrawEnv -> IO ()
-appLoop denv@(r,s) = do
-  events <- pollEvents
-  let qPressed ev =
-        case eventPayload ev of
-          KeyboardEvent keyEv ->
-            keyboardEventKeyMotion keyEv == Pressed
-            && keysymKeycode (keyboardEventKeysym keyEv) == KeycodeQ
-          _ -> False
-      exit = any qPressed events
-  clear r
-  runDraw denv $ pixel 10 10
-  present r
-  unless exit (appLoop denv)
+  renderer <- createRenderer window (-1) defaultRenderer
+  appLoop renderer dact
+  where appLoop :: Renderer -> Draw () -> IO ()
+        appLoop r dact = do
+          events <- pollEvents
+          let qPressed ev =
+                case eventPayload ev of
+                  KeyboardEvent keyEv ->
+                    keyboardEventKeyMotion keyEv == Pressed
+                    && keysymKeycode (keyboardEventKeysym keyEv) == KeycodeQ
+                  _ -> False
+              exit = any qPressed events
+          clear r
+          runDraw (r,scale) dact
+          present r
+          unless exit (appLoop r dact)
 
 -- Prototyping
 newtype Draw a =
@@ -59,8 +61,8 @@ runDraw r d = runReaderT (unDraw d) r
 rend :: Draw Renderer
 rend = fst <$> ask
 
-px :: Draw CInt
-px = snd <$> ask
+pxScale :: Draw CInt
+pxScale = snd <$> ask
 
 liftDraw :: (Renderer -> IO a) -> Draw a
 liftDraw f = do r <- rend
@@ -75,9 +77,13 @@ inColor c drw = do r <- rend
                    rendererDrawColor r $= prev
                    return a
 
+mkColor :: (Word8,Word8,Word8) -> Color
+mkColor (r,g,b) = V4 r g b 0xFF
+
+square :: CInt -> CInt -> CInt -> Draw ()
+square s x y = do sc <- (*s) <$> pxScale
+                  let shape = Just $ Rectangle (P (V2 x y)) (V2 sc sc)
+                  liftDraw $ \rend -> drawRect rend shape >> fillRect rend shape
+
 pixel :: CInt -> CInt -> Draw ()
-pixel x y = do s <- px
-               let rect = Just $ Rectangle (P (V2 x y)) (V2 s s)
-                   white = V4 0xFF 0xFF 0xFF 0xFF
-                   drawRec r = drawRect r rect >> fillRect r rect
-               inColor white $ liftDraw drawRec
+pixel = square 1
