@@ -1,17 +1,25 @@
 {-# LANGUAGE BinaryLiterals, TemplateHaskell, RankNTypes, GADTs, FlexibleContexts, TypeOperators, DataKinds, ScopedTypeVariables #-}
 
 module PPU.Internal
-  ( -- Video RAM
-    VRAM
+  ( runInternal
+    -- Video RAM
+  , VRAM
   , readVRAM
   , writeVRAM
   , runVRAM
     -- ReadInternal State
   , ReadInternal
   , baseNT, addrInc, pattTable, sprLong, genNMI
-  , greyScale, showSliver, showTile, emph
+  , greyScale, showSliver, showTile, emph, mirrors
   , Shade (..), TileType(..)
-    -- Helpers
+    -- Register Access and Control
+  , PPUReg
+  , writeCTL, readSTAT, writeMask, writeScroll
+  , writeAddr, writeData, readData
+  , writeOAMAddr, writeOAMData, readOAMData
+  , runPPUReg
+    -- Auxillaries
+  , Mirror
   , tr_, tl_, br_, bl_
   ) where
 
@@ -135,12 +143,11 @@ type Mirror = (Word16,Word16,Word16,Word16)
 tl_, tr_, bl_, br_ :: SimpleGetter Mirror Word16
 tl_ = _1
 tr_ = _2
-br_ = _3
-bl_ = _4
+bl_ = _3
+br_ = _4
 
 data Internals =
-  Internals { _ppuLaser :: Word16
-            , _ppuLatch :: Latch
+  Internals { _ppuLatch :: Latch
             , _ppuMirror :: Mirror
             , _ppuCTL :: Ctl
             , _ppuSTAT :: Status
@@ -149,7 +156,7 @@ data Internals =
 
 -- This should take some ROM data
 intern :: Internals
-intern = Internals 0 emptyLatch (0x2000,0x2400,0x2800,0x2C00)
+intern = Internals emptyLatch (0x2000,0x2400,0x2800,0x2C00)
          (Ctl 0) (Status 0) (Mask 0) 0
 
 makeLenses ''Internals
@@ -169,6 +176,8 @@ data ReadInternal a where
   ShowSliver :: TileType -> ReadInternal Bool
   ShowTile :: TileType -> ReadInternal Bool
   Emph :: Shade -> ReadInternal Bool
+  --
+  Mirrors :: ReadInternal Mirror
 
 makeEffect ''ReadInternal
 
@@ -190,6 +199,8 @@ runReadInternal = interpret go
         f (ShowSliver s) = ppuMask . msk_Sliver s
         f (ShowTile t) = ppuMask . msk_Show t
         f (Emph s) = ppuMask . msk_Emph s
+        --
+        f Mirrors = ppuMirror
         --
         see = flip (^.)
 
@@ -235,7 +246,6 @@ runPPUReg = interpret go
                          out <- get >>= (readVRAM . (^. ppuLatch . _1))
                          modify ((ppuLatch . _1) +~ inc)
                          return out
-
         -- OAM STUFF
 
 -- INTERNAL

@@ -1,90 +1,27 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GADTs, RankNTypes, FlexibleContexts, TypeOperators, DataKinds, ScopedTypeVariables #-}
 
-module PPU.Render
-  ( render
-  , Draw, DrawEnv
-  , liftDraw
-  , pxScale
-  , square
-  , pixel
-  , inColor
-  , mkColor
-  )where
+module PPU.Render where
 
-import SDL
+-- Rendering effect
+
+import PPU.Data.Tile
+import PPU.Internal
+
 import Data.Word
-import Linear (V4(..))
-import Control.Monad (unless)
-import Control.Monad.Reader
-import Control.Monad.IO.Class (liftIO)
 
-import Foreign.C.Types(CInt)
+import Control.Monad.Freer
+import Control.Monad.Freer.State
 
-type PixelScale = CInt
+data Render a where
+  Display :: Tile k -> Render ()
 
-render :: PixelScale -> Draw () -> IO ()
-render scale dact = do
-  initializeAll
-  let conf =
-        defaultWindow { windowInitialSize = V2 (256*scale) (240*scale) }
-  window <- createWindow "SampleApp" conf
-  renderer <- createRenderer window (-1) defaultRenderer
-  appLoop renderer dact
-  where appLoop :: Renderer -> Draw () -> IO ()
-        appLoop r dact = do
-          events <- pollEvents
-          let qPressed ev =
-                case eventPayload ev of
-                  KeyboardEvent keyEv ->
-                    keyboardEventKeyMotion keyEv == Pressed
-                    && keysymKeycode (keyboardEventKeysym keyEv) == KeycodeQ
-                  _ -> False
-              exit = any qPressed events
-          clear r
-          runDraw (r,scale) dact
-          present r
-          unless exit (appLoop r dact)
+display :: Member Render r => Tile a -> Eff r ()
+display = send . Display
 
--- Prototyping
-newtype Draw a =
-  Draw { unDraw :: ReaderT DrawEnv IO a }
-  deriving (Functor,Applicative,Monad
-           ,MonadReader DrawEnv
-           ,MonadIO)
+renderString :: forall r a. Eff (Render ': r) a -> Eff r (a,[String])
+renderString = runState [] . reinterpret go
+  where go :: Member (State [String]) r' => Render ~> Eff r'
+        go (Display t@(Tile r)) = put ["beech"]
 
-type DrawEnv = (Renderer, PixelScale)
-type Color = V4 Word8
-
-runDraw :: DrawEnv -> Draw a -> IO a
-runDraw r d = runReaderT (unDraw d) r
-
-rend :: Draw Renderer
-rend = fst <$> ask
-
-pxScale :: Draw CInt
-pxScale = snd <$> ask
-
-liftDraw :: (Renderer -> IO a) -> Draw a
-liftDraw f = do r <- rend
-                liftIO $ f r
-
--- COMBINATORS
-inColor :: Color -> Draw a -> Draw a
-inColor c drw = do r <- rend
-                   prev <- get $ rendererDrawColor r
-                   rendererDrawColor r $= c
-                   a <- drw
-                   rendererDrawColor r $= prev
-                   return a
-
-mkColor :: (Word8,Word8,Word8) -> Color
-mkColor (r,g,b) = V4 r g b 0xFF
-
-square :: Integral a => a -> a -> a -> Draw ()
-square s x y = do sc <- (* fromIntegral s) <$> pxScale
-                  let (x',y') = (fromIntegral x, fromIntegral y)
-                  let shape = Just $ Rectangle (P (V2 x' y')) (V2 sc sc)
-                  liftDraw $ \rend -> drawRect rend shape >> fillRect rend shape
-
-pixel :: Integral a => a -> a -> Draw ()
-pixel = square 1
+screen :: Tile Word16
+screen = Tile $ map (\x -> map ((+ (8 * x * 256)) . (*8)) [0 .. 31]) [0 .. 29]
