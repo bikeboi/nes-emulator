@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, GADTs, ScopedTypeVariables, FlexibleContexts, TypeOperators, DataKinds, QuasiQuotes, BinaryLiterals #-}
 
-module PPU.Sandbox ( sandbox,PPUCtl(..)
+module PPU.Sandbox ( sandbox,PPUReg(..)
                    , readSTAT, readOAMData,readPPUData
                    , writeCTL, writeMask
                    , writeOAMAddr, writeOAMData
@@ -12,12 +12,13 @@ import Numeric (readHex)
 import Data.Bits ((.&.),(.|.))
 import PPU.Render
 
+import Data.Char (digitToInt)
 import qualified Data.Vector as V
 import Data.Word
 import qualified Data.ByteString as B
 import Text.RawString.QQ
 import Control.Applicative (liftA3)
-import Control.Monad ((>=>))
+import Control.Monad (forM_)
 import Control.Arrow ((&&&),first)
 
 import Control.Monad.Freer
@@ -53,85 +54,52 @@ runVRAM = runState initVRAM . reinterpret go
 runVRAM_ :: forall a r. Eff (VRAM ': r) a -> Eff r a
 runVRAM_ = fmap fst . runVRAM
 
-data LatchStat = W0 | W1 | W2 deriving (Eq, Ord, Show)
-
-instance Enum LatchStat where
-  toEnum x = case x `mod` 2 of
-               0 -> W2
-               1 -> W1
-  fromEnum W0 = 0
-  fromEnum W1 = 1
-  fromEnum W2 = 2
-
--- Address Latch
-type Latch = (Word8,LatchStat)
-
-initLatch :: Latch
-initLatch = (0x00,W0)
-
-writeLatch :: Word8 -> Latch -> Latch
-writeLatch v latch = latch & (_1 .~ v) . (_2 %~ succ)
-
 -----------------
 -- PPU CONTROL --
 -----------------
-data PPUCtl a where
-  WriteCTL :: Word8 -> PPUCtl ()
+data PPUReg a where
+  WriteCTL :: Word8 -> PPUReg ()
   --
-  ReadSTAT :: PPUCtl Word8
+  ReadSTAT :: PPUReg Word8
   --
-  WriteMask :: Word8 -> PPUCtl ()
+  WriteMask :: Word8 -> PPUReg ()
   --
-  WriteScroll :: Word8 -> PPUCtl ()
+  WriteScroll :: Word8 -> PPUReg ()
   --
-  WritePPUAddr :: Word8 -> PPUCtl ()
-  WritePPUData :: Word8 -> PPUCtl ()
-  ReadPPUData :: PPUCtl Word8
+  WritePPUAddr :: Word8 -> PPUReg ()
+  WritePPUData :: Word8 -> PPUReg ()
+  ReadPPUData :: PPUReg Word8
   --
-  WriteOAMAddr :: Word8 -> PPUCtl ()
-  WriteOAMData :: Word8 -> PPUCtl ()
-  ReadOAMData :: PPUCtl Word8
+  WriteOAMAddr :: Word8 -> PPUReg ()
+  WriteOAMData :: Word8 -> PPUReg ()
+  ReadOAMData :: PPUReg Word8
 
-makeEffect ''PPUCtl
+makeEffect ''PPUReg
 
-runPPUCtl :: forall a r. Eff (PPUCtl ': r) a -> Eff r a
-runPPUCtl = interpret go
-  where go :: PPUCtl ~> Eff r
-        go = undefined
-
--- PPU Internal State
-newtype NTMirror =
-  NTMirror (Word16 -- TOP LEFT
-           ,Word16 -- TOP RIGHT
-           ,Word16 -- BOT LEFT
-           ,Word16 -- BOT RIGHT
-           ) deriving (Eq, Show)
-
-ntVert :: NTMirror
-ntVert = NTMirror (0x2000,0x2400,0x2000,0x2400)
-
-ntHorz :: NTMirror
-ntHorz = NTMirror (0x2000,0x2000,0x2800,0x2800)
-
-data PPUIntern =
-  PPUIntern { _ppuLaser :: (Word8,Word8)
-            , _ppuAddrLatch :: Latch
-            , _ppuNTMirror :: NTMirror } deriving Show
-
-initPPUIntern :: PPUIntern
-initPPUIntern = PPUIntern (0,0) initLatch ntVert
-
-makeLenses ''PPUIntern
+runPPUReg :: forall a r. (Member (State PPUInt) r, Member VRAM r)
+          =>  Eff (PPUReg ': r) a -> Eff r a
+runPPUReg = interpret go
+  where go :: PPUReg ~> Eff r
+        go (WriteCTL c) = modify $ (ppuCTL .~ PPUCTL c) . latch c
+        go ReadSTAT = unlatch >> get >>= pure . ((^.) ppuSTAT . unwrapSTAT)
+        go _ = undefined
+        --
+        latch n = ppuAddrLatch %~ writeLatch n
+        unlatch :: Eff r ()
+        unlatch = modify $ ppuAddrLatch .~ emptyLatch
 
 -- Get nametable entry
 
 -- COLOR PALETTE
+type Color = (Word8,Word8,Word8)
+type Pallette = (Color,Color,Color)
+
 parsePallette :: [Word8] -> [Color]
 parsePallette = zipWith3 (,,) <$> skip3 <*> skip3 . tail <*> skip3 . tail . tail
   where skip3 = map snd . filter ((==0) . (`mod` 3) . fst) . zip [0..]
 
 -- TOP LEVEL
-tileColorIndex :: forall r. (Member (State PPUIntern) r, Member VRAM r)
+tileColorIndex :: forall r. (Member (State PPUInt) r, Member VRAM r)
           => Eff r Tile
 tileColorIndex =
   get
@@ -142,7 +110,7 @@ tileColorIndex =
 type ATEntry = Word8
 type NTEntry = Word16
 
-calcColorIndex :: forall r. (Member VRAM r, Member (State PPUIntern) r)
+calcColorIndex :: forall r. (Member VRAM r, Member (State PPUInt) r)
               => (Word8,Word8) -> NTMirror -> Eff r CHR
 calcColorIndex xy ntmirr = do
   let quad = ntQuadrant xy ntmirr
@@ -173,33 +141,42 @@ getAT (x,y) offset = let
   in (.>>. shift) . (.&. mask) <$> readVRAM addr
 
 newtype TileRep a =
-  Tile [[a]]
+  Tile (V.Vector (V.Vector a))
   deriving Show
 
 instance Functor TileRep where
   fmap f (Tile xs) = Tile $ (fmap . fmap) f xs
 
+
 type CHR = TileRep Word8
 type Tile = TileRep Color
 
-calcIndex :: forall r. Member (State PPUIntern) r
+calcIndex :: forall r. Member (State PPUInt) r
           => CHR -> ATEntry -> Eff r CHR -- remember to get bg or spr picker
 calcIndex patt at = pure $ fmap (\p -> p .|. (at .<<. 2)) patt
 
 getPT :: forall r. Member VRAM r => Word8 -> Eff r CHR
-getPT x = Tile <$> mapM getPT' [x .. x+7]
-  where getPT' :: Word8 -> Eff r [Word8]
+getPT x = Tile <$> V.mapM getPT' (V.generate 7 ((+x) . fromIntegral))
+  where getPT' :: Word8 -> Eff r (V.Vector Word8)
         getPT' nval = do
           let paddr = to16 nval .<<. 1
-          (a,b) <- (,) <$> readVRAM paddr <*> readVRAM (paddr + 8)
-          let as = map (read . (:[])) $ show2 a
-              bs = map (read . (:[])) $ show2 b
-          pure $ zipWith (\lf rh -> (lf .<<. 1) .|. rh) as bs
+          ab <- (,) <$> readVRAM paddr <*> readVRAM (paddr + 8)
+          pure . uncurry mkCHR $ ab
+
+mkCHR :: Word8 -> Word8 -> V.Vector Word8
+mkCHR a b = let f = fmap (to8 . digitToInt) . V.fromList . show2
+                (as,bs) = (f a,f b)
+            in V.zipWith (\h l -> (h .<<. 1) .|. l) as bs
 
 sandbox :: IO ()
 sandbox = print $ test $ tileColorIndex -- >>= pure . (V.!) pallettes . fromIntegral
 
-type Color = (Word8,Word8,Word8)
-type Pallette = (Color,Color,Color)
+-- RENDERING
+drawTile :: Tile -> (Word8,Word8) -> Draw ()
+drawTile (Tile arr) (xoff,yoff)= V.zipWithM_ drawRows xoffs arr
+  where drawRows x r = V.zipWithM_ (drawPix x) yoffs r
+        drawPix x y c = inColor (mkColor c) $ pixel x y
+        xoffs = V.generate 8 ((+ xoff) . fromIntegral)
+        yoffs = V.generate 8 ((+ yoff) . fromIntegral)
 
-test = run . runVRAM_ . runState initPPUIntern
+test = run . runVRAM_ . runState initPPUInt . runPPUReg

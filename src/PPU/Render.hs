@@ -80,10 +80,11 @@ inColor c drw = do r <- rend
 mkColor :: (Word8,Word8,Word8) -> Color
 mkColor (r,g,b) = V4 r g b 0xFF
 
-square :: CInt -> CInt -> CInt -> Draw ()
-square s x y = do sc <- (*s) <$> pxScale
-                  let shape = Just $ Rectangle (P (V2 x y)) (V2 sc sc)
+square :: Integral a => a -> a -> a -> Draw ()
+square s x y = do sc <- (* fromIntegral s) <$> pxScale
+                  let (x',y') = (fromIntegral x, fromIntegral y)
+                  let shape = Just $ Rectangle (P (V2 x' y')) (V2 sc sc)
                   liftDraw $ \rend -> drawRect rend shape >> fillRect rend shape
 
-pixel :: CInt -> CInt -> Draw ()
+pixel :: Integral a => a -> a -> Draw ()
 pixel = square 1

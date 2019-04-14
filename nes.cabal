@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a728dbb79a18a198404735c70e560f7d82b4f3d2fbee5c6035f8942df52ec8ee
+-- hash: 106ba78b5021ab6faedd598accbea93f539eb1175099392d9a608e3c695f4106
 
 name:           nes
 version:        0.1.0.0
@@ -25,6 +25,7 @@ executable nes
       PPU.Render
       PPU.Internal
       PPU.Sandbox
+      PPU.Data.Tile
       Memory
       Util
   hs-source-dirs:
@@ -60,6 +61,7 @@ test-suite spec
       CPU.Sandbox
       Main
       Memory
+      PPU.Data.Tile
       PPU.Internal
       PPU.Render
       PPU.Sandbox

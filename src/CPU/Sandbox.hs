@@ -18,9 +18,9 @@ import qualified Data.Vector as V
 -- Handle PPU Stuff
 type IOBus = Word8
 
-logPPUCtl :: Eff (PPUCtl ': r) a -> Eff r (a,[String])
-logPPUCtl = runState [] . reinterpret reint
-  where reint :: PPUCtl ~> Eff (State [String] ': r)
+logPPUReg :: Eff (PPUReg ': r) a -> Eff r (a,[String])
+logPPUReg = runState [] . reinterpret reint
+  where reint :: PPUReg ~> Eff (State [String] ': r)
         reint (WriteCTL v) = modify $ logg "WriteCTL"
         reint ReadSTAT = modify (logg "ReadStat") >> return 0
         reint (WritePPUAddr _) = modify $ logg "WriteAddr"
@@ -43,7 +43,7 @@ data RAM a where
 makeEffect ''RAM
 
 -- We need to interpose RAM stuff with PPU Control
-ppuControl :: forall a r. (Member RAM r, Member PPUCtl r)
+ppuControl :: forall a r. (Member RAM r, Member PPUReg r)
            => Eff r a
            -> Eff r a
 ppuControl req = interpose go req
@@ -121,11 +121,11 @@ runCPU = runState initRegs . reinterpret go
         initRegs = Regs 0 0 0 0 0x8000 Nothing
 
 -- BIG PICTURE
-runNES :: Eff '[CPU,PPUCtl,RAM] a -> (a,Regs,[String])
+runNES :: Eff '[CPU,PPUReg,RAM] a -> (a,Regs,[String])
 runNES = merge3
          . run
          . runRAM     -- Big boi state change
-         . logPPUCtl  -- Execute CPU -> PPU interaction
+         . logPPUReg  -- Execute CPU -> PPU interaction
          . ppuControl -- Translates RAM reads and writes to PPUCTL commands
          . reflectRAM -- Mirroring addresses (so crucial omg)
          . runCPU

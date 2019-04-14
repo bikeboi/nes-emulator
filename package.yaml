@@ -43,6 +43,7 @@ executables:
       - PPU.Render
       - PPU.Internal
       - PPU.Sandbox
+      - PPU.Data.Tile
 
       # Memory
       - Memory
