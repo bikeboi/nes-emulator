@@ -9,6 +9,7 @@ import Numeric (showIntAtBase, readHex)
 import Data.Bits
 import PPU.Internal
 
+import qualified Data.Vector as V
 import Data.Char (digitToInt, intToDigit)
 import Data.Word
 
@@ -18,11 +19,11 @@ import Control.Arrow ((***), (&&&))
 import Control.Monad.Freer
 
 -- * Tile Construction
-mkTile :: (Member VRAM r, Member ReadInternal r)
+buildTile :: (Member VRAM r, Member ReadInternal r)
        => Word16 -> Eff r (Tile Word8)
-mkTile x = do (nt,ntOff) <- nametable x
-              color <- attrColor $ attrIx x ntOff
-              (fmap . fmap) (const color) $ patternTable nt
+buildTile x = do (nt,ntOff) <- nametable x
+                 color <- attrColor $ attrIx x ntOff
+                 (fmap . fmap) (const color) $ patternTable nt
 
 -- * Nametable
 nametable :: (Member VRAM r, Member ReadInternal r) => Word16 -> Eff r (Word8,Word16)
@@ -71,28 +72,44 @@ patternTable x = pattTable BG >>= mkCHR x
 
 mkCHR :: Member VRAM r => Word8 -> Word16 -> Eff r (Tile Int)
 mkCHR addr offs = do let addr' = (+ offs) $ to16 $ addr .<<. 4
-                     hi <- mapM readVRAM [addr' .. addr'+7]
-                     lo <- mapM readVRAM [addr'+8 .. addr'+16]
-                     return $ Tile $ zipWith mkSliver hi lo
+                     hi <- V.mapM readVRAM $ V.fromList [addr' .. addr'+7]
+                     lo <- V.mapM readVRAM $ V.fromList [addr'+8 .. addr'+16]
+                     return $ Tile $ V.zipWith mkSliver hi lo
 
-mkSliver :: Word8 -> Word8 -> Sliver Int
-mkSliver a b = map (\i -> combine (a `cbit` i) (b `cbit` i)) [7,6..0]
+mkSliver :: Word8 -> Word8 -> V.Vector Int
+mkSliver a b = V.map (\i -> combine (a `cbit` i) (b `cbit` i))
+               $ V.generate 7 (7-)
   where combine False False = 0
         combine False True  = 1
         combine True  False = 2
         combine _     _     = 3
 
-type Sliver a = [a]
-
 newtype Tile a =
-  Tile [Sliver a]
-  deriving Eq
+  Tile { untile :: V.Vector (V.Vector a) }
+  deriving (Eq, Show)
 
 instance Functor Tile where
-  fmap f (Tile sliver) = Tile $ (fmap . fmap) f sliver
+  fmap f = Tile . (fmap . fmap) f . untile
 
-ppTile :: Show a => Tile a -> IO ()
-ppTile (Tile aas) = mapM_ print aas
+mkTile :: Integral i => i -> i -> (i -> i -> b) -> Tile b
+mkTile w h f = Tile
+               $ V.generate (fromIntegral h)
+               $ \r -> V.generate (fromIntegral w)
+                       $ flip f (fromIntegral r) . fromIntegral
+
+zipTileWith :: forall a b c. (a -> b -> c) -> Tile a -> Tile b -> Tile c
+zipTileWith f (Tile v) (Tile w) = Tile $ V.zipWith f' v w
+  where -- f' :: V.Vector a -> V.Vector b -> V.Vector c
+        f' v w = V.zipWith f v w
+
+mapTileM :: Monad m => (a -> m b) -> Tile a -> m (Tile b)
+mapTileM mf (Tile v) = fmap Tile . (V.mapM . V.mapM) mf $ v
+
+mapTileM_ :: Monad m => (a -> m b) -> Tile a -> m ()
+mapTileM_ mf t = mapTileM mf t >> return ()
+
+pp :: Show a => Tile a -> IO ()
+pp (Tile v) = V.mapM_ print v
 
 type CHR = Tile Word8
 

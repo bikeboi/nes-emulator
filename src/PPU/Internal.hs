@@ -19,6 +19,7 @@ module PPU.Internal
   , writeOAMAddr, writeOAMData, readOAMData
   , runPPUReg
     -- Auxillaries
+  , Internals
   , Mirror
   , tr_, tl_, br_, bl_
   ) where

@@ -4,7 +4,7 @@
 
 module CPU.Sandbox where
 
-import PPU.Sandbox
+import PPU.Internal as P
 import Util
 import CPU.Decode
 import Control.Monad.Freer
@@ -17,19 +17,6 @@ import qualified Data.Vector as V
 
 -- Handle PPU Stuff
 type IOBus = Word8
-
-logPPUReg :: Eff (PPUReg ': r) a -> Eff r (a,[String])
-logPPUReg = runState [] . reinterpret reint
-  where reint :: PPUReg ~> Eff (State [String] ': r)
-        reint (WriteCTL v) = modify $ logg "WriteCTL"
-        reint ReadSTAT = modify (logg "ReadStat") >> return 0
-        reint (WritePPUAddr _) = modify $ logg "WriteAddr"
-        reint (WritePPUData _) = modify $ logg "WriteData"
-        reint ReadPPUData = modify (logg "ReadData") >> return 0
-        reint _ = undefined
-        --
-        logg :: String -> [String] -> [String]
-        logg = (++) . (:[])
 
 ---------
 -- RAM --
@@ -57,7 +44,7 @@ ppuControl req = interpose go req
         mapRead :: Word16 -> Eff r Word8
         mapRead 0x2002 = readSTAT    -- Read PPU Status
         mapRead 0x2004 = readOAMData -- Read OAM Data
-        mapRead 0x2007 = readPPUData -- Read PPU Data
+        mapRead 0x2007 = readData -- Read PPU Data
         --
         mapWrite :: Word16 -> Word8 -> Eff r ()
         mapWrite 0x2000 = writeCTL
@@ -65,8 +52,8 @@ ppuControl req = interpose go req
         mapWrite 0x2003 = writeOAMAddr -- Write OAM Address
         mapWrite 0x2004 = writeOAMData -- Write OAM Data
         mapWrite 0x2005 = writeScroll  -- Write scroll
-        mapWrite 0x2006 = writePPUAddr -- Write PPU Address
-        mapWrite 0x2007 = writePPUData -- Write PPU Data
+        mapWrite 0x2006 = writeAddr -- Write PPU Address
+        mapWrite 0x2007 = writeData -- Write PPU Data
 
 --
 runRAM :: forall a r. Eff (RAM ': r) a -> Eff r a
@@ -121,12 +108,5 @@ runCPU = runState initRegs . reinterpret go
         initRegs = Regs 0 0 0 0 0x8000 Nothing
 
 -- BIG PICTURE
-runNES :: Eff '[CPU,PPUReg,RAM] a -> (a,Regs,[String])
-runNES = merge3
-         . run
-         . runRAM     -- Big boi state change
-         . logPPUReg  -- Execute CPU -> PPU interaction
-         . ppuControl -- Translates RAM reads and writes to PPUCTL commands
-         . reflectRAM -- Mirroring addresses (so crucial omg)
-         . runCPU
-  where merge3 ((a,b),c) = (a,b,c)
+runNES :: Eff '[CPU,RAM] a -> (a,Regs,[String])
+runNES = undefined

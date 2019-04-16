@@ -40,10 +40,12 @@ executables:
       - CPU.Sandbox
 
       # PPU
+      - PPU
       - PPU.Render
       - PPU.Internal
-      - PPU.Sandbox
+      # - PPU.Sandbox
       - PPU.Data.Tile
+      - PPU.SDL
 
       # Memory
       - Memory
